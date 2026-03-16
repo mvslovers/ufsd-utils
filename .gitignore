@@ -1,0 +1,24 @@
+# Compiled binary (root level only)
+/ufsd-utils
+
+# Disk images (test/dev artifacts)
+*.img
+
+# Go build artifacts
+*.exe
+*.test
+*.out
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
