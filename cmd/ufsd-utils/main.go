@@ -612,22 +612,32 @@ func filepath_ext(p string) string {
 	return ""
 }
 
-// printMVSAlloc prints MVS BDAM allocation parameters for the given
+// printMVSAlloc prints MVS allocation parameters for the given
 // block size and total block count.
+// UFSD opens datasets via BDAM regardless of DSORG, so a standard
+// PS dataset with the correct BLKSIZE works fine and is easier to
+// create and upload (zowe, IND$FILE, ISPF 3.2 all work).
 func printMVSAlloc(blksize, totalBlocks uint32) {
-	fmt.Println("  MVS Dataset Allocation (DSORG=DA, BDAM):")
+	fmt.Println("  MVS Dataset Allocation:")
 	fmt.Println()
-	fmt.Printf("    DCB=(DSORG=DA,BLKSIZE=%d)  SPACE=(%d,(%d))\n",
+	fmt.Printf("    BLKSIZE=%d  SPACE=(%d,(%d))\n",
 		blksize, blksize, totalBlocks)
 	fmt.Println()
-	fmt.Println("    JCL (recommended — ISPF/RPF panel cannot set DSORG=DA):")
+	fmt.Println("    ISPF 3.2 / RPF 2:")
+	fmt.Printf("      RECORD FORMAT          ==> U\n")
+	fmt.Printf("      LOGICAL RECORD LENGTH  ==> %d\n", blksize)
+	fmt.Printf("      PHYSICAL BLOCK SIZE    ==> %d\n", blksize)
+	fmt.Printf("      ALLOCATION SPACE UNIT  ==> B        (B = blocks)\n")
+	fmt.Printf("      PRIMARY SPACE QUANTITY ==> %d\n", totalBlocks)
+	fmt.Println()
+	fmt.Println("    JCL:")
 	fmt.Printf("      //ALLOC  EXEC PGM=IEFBR14\n")
 	fmt.Printf("      //DISK   DD DSN=your.dataset.name,\n")
 	fmt.Printf("      //          DISP=(NEW,CATLG,DELETE),UNIT=SYSDA,\n")
 	fmt.Printf("      //          SPACE=(%d,(%d)),\n", blksize, totalBlocks)
-	fmt.Printf("      //          DCB=(DSORG=DA,BLKSIZE=%d)\n", blksize)
+	fmt.Printf("      //          DCB=(RECFM=U,BLKSIZE=%d)\n", blksize)
 	fmt.Println()
-	fmt.Println("    Transfer: FTP binary PUT into pre-allocated dataset")
+	fmt.Println("    Transfer: zowe, IND$FILE (binary), or FTP binary PUT")
 }
 
 // reorderArgs moves flags (--foo, -f, --foo=bar) before positional args,
