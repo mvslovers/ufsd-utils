@@ -49,10 +49,9 @@ Key facts:
 
 ## Known Limitations
 
-- **Direct blocks only** — `CreateFile`/`ReadFileData` support addr[0..15]
-  (max 16 × blksize = 64 KB at 4096). Single/double/triple indirect
-  addressing (addr[16..18]) is not yet implemented. UFSD server already
-  supports single indirect — this needs to be ported.
+- **Single indirect supported** — `CreateFile`/`ReadFileData` support
+  addr[0..15] (direct) + addr[16] (single indirect), up to ~4 MB at 4096.
+  Double/triple indirect addressing (addr[17..18]) is not yet implemented.
 - **No delete** — `rm` / `unlink` not implemented (no block/inode deallocation)
 - **No overwrite** — `CreateFile` fails if the name already exists
 - **No fsck** — no consistency checker yet

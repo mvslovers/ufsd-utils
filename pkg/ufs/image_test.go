@@ -238,6 +238,113 @@ func TestResolvePathDotDot(t *testing.T) {
 	}
 }
 
+// TestCreateLargeFileIndirect verifies single indirect block support
+// for files > 64KB (> 16 direct blocks at 4096 blocksize).
+func TestCreateLargeFileIndirect(t *testing.T) {
+	// 2MB image, enough room for a ~100KB file
+	img, _ := tempImage(t, 2*1024*1024, 4096)
+	defer img.Close()
+
+	// Create a 100KB file (25 blocks — 16 direct + 9 indirect)
+	size := 100 * 1024
+	data := make([]byte, size)
+	for i := range data {
+		data[i] = byte(i % 251) // deterministic pattern
+	}
+
+	if err := img.CreateFile("/large.bin", data, "USR", "GRP"); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+
+	// Verify inode has indirect block set
+	ino, err := img.ResolvePath("/large.bin")
+	if err != nil {
+		t.Fatalf("ResolvePath: %v", err)
+	}
+	di, err := img.ReadInode(ino)
+	if err != nil {
+		t.Fatalf("ReadInode: %v", err)
+	}
+	if di.FileSize != uint32(size) {
+		t.Errorf("FileSize = %d, want %d", di.FileSize, size)
+	}
+	if di.Addr[NAddrIndex1] == 0 {
+		t.Error("Addr[16] (indirect block) is 0, expected non-zero")
+	}
+
+	// Read back and compare
+	got, err := img.ReadFileData(ino)
+	if err != nil {
+		t.Fatalf("ReadFileData: %v", err)
+	}
+	if len(got) != len(data) {
+		t.Fatalf("ReadFileData length = %d, want %d", len(got), len(data))
+	}
+	for i := range data {
+		if got[i] != data[i] {
+			t.Errorf("byte mismatch at offset %d: got 0x%02X, want 0x%02X", i, got[i], data[i])
+			break
+		}
+	}
+}
+
+// TestSmallFileNoIndirect verifies that files <= 64KB use only direct blocks.
+func TestSmallFileNoIndirect(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	// Create a 64KB file (exactly 16 blocks — all direct)
+	data := make([]byte, 16*4096)
+	for i := range data {
+		data[i] = byte(i % 199)
+	}
+
+	if err := img.CreateFile("/exact16.bin", data, "USR", "GRP"); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+
+	ino, err := img.ResolvePath("/exact16.bin")
+	if err != nil {
+		t.Fatalf("ResolvePath: %v", err)
+	}
+	di, err := img.ReadInode(ino)
+	if err != nil {
+		t.Fatalf("ReadInode: %v", err)
+	}
+	if di.Addr[NAddrIndex1] != 0 {
+		t.Error("Addr[16] should be 0 for file that fits in direct blocks")
+	}
+
+	got, err := img.ReadFileData(ino)
+	if err != nil {
+		t.Fatalf("ReadFileData: %v", err)
+	}
+	if len(got) != len(data) {
+		t.Fatalf("length = %d, want %d", len(got), len(data))
+	}
+	for i := range data {
+		if got[i] != data[i] {
+			t.Errorf("byte mismatch at offset %d", i)
+			break
+		}
+	}
+}
+
+// TestFileTooLargeForSingleIndirect verifies rejection of files > ~4MB.
+func TestFileTooLargeForSingleIndirect(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	// 4MB + 4KB = exceeds single indirect capacity
+	maxBlocks := uint32(NAddrDirect) + 4096/4
+	tooBig := make([]byte, (maxBlocks+1)*4096)
+
+	err := img.CreateFile("/huge.bin", tooBig, "USR", "GRP")
+	if err == nil {
+		t.Error("expected error for file exceeding single indirect capacity")
+	}
+}
+
 func TestBlockSizes(t *testing.T) {
 	for _, bs := range []uint32{512, 1024, 2048, 4096, 8192} {
 		t.Run("blksize="+string(rune('0'+bs/512)), func(t *testing.T) {
