@@ -67,7 +67,8 @@ image_size_bytes   = total_blocks × blksize
 inode_blocks       = floor(total_blocks / inodes_per_block × inode_pct / 100 + 0.5)
                      minimum 2
 datablock_start    = 2 + inode_blocks
-total_inodes       = inode_blocks × (blksize / 128)
+total_inodes       = inode_blocks × (blksize / 128)   (numbered 1..N)
+allocatable_inodes = total_inodes - 1                  (minus BALBLK)
 total_data_blocks  = total_blocks - datablock_start
 usable_bytes       = total_data_blocks × blksize
 ```
@@ -190,8 +191,8 @@ Offset  Size  Type       Field      Description
 0x08    8     UFSTIMEV   ctime      Creation time
 0x10    8     UFSTIMEV   mtime      Modification time
 0x18    8     UFSTIMEV   atime      Access time
-0x20    9     char[9]    owner      Owner user ID + NUL
-0x29    9     char[9]    group      Group name + NUL
+0x20    9     char[9]    owner      Owner user ID (EBCDIC, NUL-padded)
+0x29    9     char[9]    group      Group name (EBCDIC, NUL-padded)
 0x32    2     UINT16     codepage   Code page (0 = default EBCDIC)
 0x34    76    UINT32[19] addr       Block address list
 ```
@@ -233,9 +234,9 @@ v1.useconds = (uint32_t)(v2_ms % 1000) × 1000
 
 ### 5.3 Inode Numbering
 
-- Inode 0: Reserved (never used)
-- Inode 1: BALBLK (monument, never used)
-- Inode 2: **Root directory** (always)
+- Inode 0: Logical placeholder (no physical slot, never used)
+- Inode 1: BALBLK (monument, slot 0 filled with 0xFF, never allocated)
+- Inode 2: **Root directory** (always, slot 1)
 - Inode 3+: Available for allocation
 
 Given an inode number `ino`:
@@ -244,9 +245,11 @@ sector = ilist_sector + (ino - 1) / inodes_per_block
 offset = ((ino - 1) % inodes_per_block) × 128
 ```
 
-Note: inode 0 occupies the first 128-byte slot in sector 2, but is
-never allocated. Inode 1 (BALBLK) occupies the second slot. Inode 2
-(root) is the third slot.
+The formula uses `(ino - 1)`, so **inode 1 occupies slot 0** (first
+128-byte slot in sector 2), inode 2 occupies slot 1, etc.  Inode 0
+is a logical concept only — it has no physical slot and is never
+allocated.  The total number of inodes is `inode_blocks × inodes_per_block`,
+numbered 1 through N.
 
 ### 5.4 Mode Field (File Type + Permissions)
 
@@ -302,7 +305,7 @@ An address value of 0 means "not allocated" (sparse file / hole).
 Offset  Size  Type     Field          Description
 ------  ----  -------  -----------    -----------
 0x00    4     UINT32   inode_number   Inode number (0 = free/deleted entry)
-0x04    60    char[60] name           Filename + NUL (max 59 chars)
+0x04    60    char[60] name           Filename (EBCDIC, NUL-padded, max 59 chars)
 ```
 
 Total: 0x40 (64 bytes). Entries per block: `blksize / 64`.
@@ -458,10 +461,13 @@ Set `update_time = 0`, `create_time = 0` (version 1 uses boot extension).
 
 ### 10.4 Phase 4: Write Inode Blocks
 
-For each inode block (sectors 2 through datablock_start - 1):
-- Fill with 0xFF (marks uninitialized)
-- For each inode slot: clear to 0x00 (marks as free, `mode == 0`)
-- Exception: inode 0 and inode 1 remain 0xFF (reserved)
+The first inode block (sector 2) requires special handling because
+slot 0 (inode 1 = BALBLK) is reserved:
+- Fill slots 0 with 0xFF (128 bytes) — marks BALBLK as reserved
+- Fill all remaining slots with 0x00 — marks them as free (`mode == 0`)
+
+All subsequent inode blocks (sectors 3 through datablock_start - 1):
+- Fill entirely with 0x00 — all slots free
 
 ### 10.5 Phase 5: Build Free Block Chain
 
@@ -475,20 +481,34 @@ Starting from `datablock_start`, build the chain:
 
 1. Allocate inode 2 (root) from free inode cache
 2. Allocate one data block for the root directory
-3. Write root inode:
+3. Write root inode (**zero the entire 128-byte slot first**):
    - `mode = 0x41ED` (directory + 0755)
    - `nlink = 2`
    - `filesize = 128` (2 × 64-byte entries)
    - `addr[0] = allocated_block`
+   - `addr[1..18] = 0` (must be zero, not left over from reserved fill)
+   - `codepage = 0`
    - `ctime/mtime/atime = now` (time64 format)
-   - `owner = "HERC01"` (or from RACF ACEE)
-   - `group = "ADMIN"` (or from RACF ACEE)
+   - `owner = "HERC01"` (EBCDIC, NUL-padded to 9 bytes)
+   - `group = "ADMIN"` (EBCDIC, NUL-padded to 9 bytes)
 4. Write root data block:
-   - Entry 0: `inode=2, name="."`
-   - Entry 1: `inode=2, name=".."` (root parent is itself)
+   - Entry 0: `inode=2, name="."` (EBCDIC, NUL-padded to 60 bytes)
+   - Entry 1: `inode=2, name=".."` (EBCDIC, NUL-padded to 60 bytes)
 5. Write back superblock (freeblock/freeinode caches updated)
 
-### 10.7 Phase 7: Verify
+### 10.7 Phase 7: Populate Free Inode Cache
+
+The superblock's free inode cache (`nfreeinode` / `freeinode[]`) must
+be populated before writing the final superblock.  UFSD reads this
+cache at mount time; an empty cache causes allocation failures.
+
+1. Scan all inode blocks (sectors 2 through datablock_start - 1)
+2. For each slot with `mode == 0` and `ino > 1` (skip BALBLK):
+   add the inode number to `sb.freeinode[]`
+3. Stop when `nfreeinode` reaches 64 (max cache size)
+4. Set `sb.total_freeinode` = total inode slots - 1 (BALBLK) - 1 (root)
+
+### 10.8 Phase 8: Write Superblock and Verify
 
 Read back boot block, superblock, and root inode. Verify checksums,
 counts, and root directory structure.
@@ -602,8 +622,8 @@ struct ufs_dinode {
     UFSTIMEV ctime;     /* 8 bytes: V1={sec,usec} or V2=time64 */
     UFSTIMEV mtime;
     UFSTIMEV atime;
-    char     owner[9];  /* EBCDIC + NUL */
-    char     group[9];  /* EBCDIC + NUL */
+    char     owner[9];  /* EBCDIC, NUL-padded */
+    char     group[9];  /* EBCDIC, NUL-padded */
     UINT16   codepage;
     UINT32   addr[19];
 };
@@ -611,7 +631,7 @@ struct ufs_dinode {
 /* Directory Entry (64 bytes) */
 struct ufs_dirent {
     UINT32  inode_number;   /* 0 = free */
-    char    name[60];       /* EBCDIC + NUL, max 59 chars */
+    char    name[60];       /* EBCDIC, NUL-padded, max 59 chars */
 };
 
 /* Timestamp Union (8 bytes) */
