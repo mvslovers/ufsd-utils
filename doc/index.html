@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EBCDIC Roundtrip Test Page</title>
+<style>
+body { font-family: monospace; margin: 2em; background: #f8f8f8; color: #222; }
+h1 { font-size: 1.4em; }
+h2 { font-size: 1.1em; margin-top: 1.5em; border-bottom: 1px solid #ccc; }
+table { border-collapse: collapse; margin: 0.5em 0; }
+td, th { border: 1px solid #999; padding: 4px 8px; text-align: left; }
+th { background: #ddd; }
+pre { background: #eee; padding: 1em; overflow-x: auto; }
+code { background: #eee; padding: 2px 4px; }
+.pass { color: green; }
+.fail { color: red; }
+</style>
+</head>
+<body>
+
+<h1>EBCDIC/ASCII Roundtrip Test Page</h1>
+<p>This file exercises characters critical for the IBM-1047 roundtrip chain:<br>
+<code>ufsd-utils cp</code> (ASCII&rarr;EBCDIC) &rarr; UFSD &rarr; HTTPD (EBCDIC&rarr;ASCII) &rarr; Browser</p>
+
+<h2>1. Brackets, Braces, Pipes</h2>
+<p>These differ between CP037 and IBM-1047:</p>
+<table>
+<tr><th>Char</th><th>Name</th><th>ASCII</th><th>IBM-1047</th></tr>
+<tr><td>[</td><td>Left bracket</td><td>0x5B</td><td>0xAD</td></tr>
+<tr><td>]</td><td>Right bracket</td><td>0x5D</td><td>0xBD</td></tr>
+<tr><td>{</td><td>Left brace</td><td>0x7B</td><td>0xC0</td></tr>
+<tr><td>}</td><td>Right brace</td><td>0x7D</td><td>0xD0</td></tr>
+<tr><td>|</td><td>Pipe</td><td>0x7C</td><td>0x4F</td></tr>
+<tr><td>\</td><td>Backslash</td><td>0x5C</td><td>0xE0</td></tr>
+<tr><td>^</td><td>Caret</td><td>0x5E</td><td>0x5F</td></tr>
+<tr><td>~</td><td>Tilde</td><td>0x7E</td><td>0xA1</td></tr>
+</table>
+
+<h2>2. All Printable ASCII (0x20-0x7E)</h2>
+<pre>
+ !"#$%&amp;'()*+,-./
+0123456789:;&lt;=&gt;?
+@ABCDEFGHIJKLMNO
+PQRSTUVWXYZ[\]^_
+`abcdefghijklmno
+pqrstuvwxyz{|}~
+</pre>
+
+<h2>3. Punctuation &amp; Symbols</h2>
+<p>Common: . , ; : ! ? - _ ' " ` &acute;</p>
+<p>Math: + - * / = &lt; &gt; ^ ~</p>
+<p>Currency: $ &pound; &yen; &cent;</p>
+<p>Special: @ # % &amp; | \ ( ) [ ] { }</p>
+<p>Quotes: "double" 'single' `backtick`</p>
+
+<h2>4. HTML Entities &amp; Escaping</h2>
+<p>Ampersand: &amp; (must be &amp;amp; in source)</p>
+<p>Less-than: &lt; (must be &amp;lt; in source)</p>
+<p>Greater-than: &gt; (must be &amp;gt; in source)</p>
+<p>Double-quote: &quot; (must be &amp;quot; in source)</p>
+<p>Literal in attribute: <span title="test &quot;quotes&quot; &amp; <angle>">hover me</span></p>
+
+<h2>5. JavaScript-Critical Characters</h2>
+<pre>
+// Array access
+var arr = [1, 2, 3];
+var x = arr[0];
+
+// Object literal
+var obj = { key: "value", count: 42 };
+
+// Template literal (backtick)
+var msg = `Hello ${obj.key}`;
+
+// Regex with special chars
+var re = /^[a-z]+\.[0-9]{2,4}$/;
+
+// Bitwise operators
+var flags = (a | b) &amp; ~c ^ d;
+
+// Backslash in strings
+var path = "C:\\Users\\test\\file.txt";
+var tab = "\t"; var nl = "\n"; var cr = "\r";
+
+// Arrow function with destructuring
+const fn = ({a, b}) => [a, ...b];
+
+// Ternary with brackets
+var r = (x > 0) ? {ok: true} : {ok: false};
+</pre>
+
+<h2>6. CSS-Critical Characters</h2>
+<pre>
+/* Selectors with brackets and combinators */
+body > div.container {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    background: #f0f0f0;
+    color: rgb(34, 34, 34);
+    margin: 0;
+    padding: 1em;
+}
+
+input[type="text"] { border: 1px solid #ccc; }
+a[href^="https://"] { color: green; }
+a[href$=".pdf"] { color: red; }
+p::before { content: "\00AB"; }  /* backslash in content */
+p::after  { content: "\00BB"; }
+
+@media (min-width: 768px) {
+    .col { width: calc(100% / 3 - 2em); }
+}
+</pre>
+
+<h2>7. Newline Variants</h2>
+<p>This paragraph has a line break here<br>
+and continues on the next line.</p>
+<pre>
+Line 1 (followed by LF only, Unix-style)
+Line 2 (followed by LF only)
+Line 3 (last line, no trailing newline)</pre>
+<p>Note: The source file uses Unix LF (0x0A) line endings.<br>
+IBM-1047 maps ASCII LF (0x0A) to EBCDIC 0x25.<br>
+HTTPD must translate EBCDIC 0x25 back to ASCII LF for the browser.<br>
+CR+LF (0x0D 0x0A) should also work: CR maps to 0x0D, LF to 0x25.</p>
+
+<h2>8. URL Encoding Characters</h2>
+<pre>
+https://example.com/path?key=value&amp;other=123#anchor
+https://example.com/search?q=hello+world&amp;lang=en
+https://example.com/file%20name.html
+mailto:user@host.com
+</pre>
+
+<h2>9. JSON Content</h2>
+<pre>
+{
+    "string": "hello \"world\"",
+    "number": 42,
+    "float": 3.14,
+    "boolean": true,
+    "null": null,
+    "array": [1, 2, 3],
+    "nested": {
+        "key": "value with special chars: []{}|\\^~"
+    },
+    "escaped": "tab:\t newline:\n backslash:\\ quote:\""
+}
+</pre>
+
+<h2>10. XML/SVG Characters</h2>
+<pre>
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"&gt;
+  &lt;rect x="10" y="10" width="80" height="80"
+        style="fill:rgb(0,0,255);stroke-width:3;stroke:rgb(0,0,0)"/&gt;
+  &lt;text x="50" y="55" text-anchor="middle"&gt;A &amp; B &lt; C&lt;/text&gt;
+&lt;/svg&gt;
+</pre>
+
+<h2>11. Shell / Command Characters</h2>
+<pre>
+#!/bin/sh
+echo "Hello $USER" | grep -E '^[A-Z]' &gt; /dev/null 2&gt;&amp;1
+result=$?
+if [ $result -eq 0 ]; then
+    echo "Match found" &amp;&amp; exit 0
+else
+    echo "No match" || exit 1
+fi
+# Backticks (legacy command substitution)
+DATE=`date +%Y-%m-%d`
+# Dollar-paren (modern)
+DATE=$(date +%Y-%m-%d)
+# Glob patterns
+ls *.txt ?.log [abc]*.dat
+# Here-document
+cat &lt;&lt;'EOF'
+Special: $ ` \ ! # ~ ^ { } [ ] | &amp;
+EOF
+</pre>
+
+<h2>12. Mixed Stress Test</h2>
+<p>All 94 printable non-space ASCII in one line:</p>
+<pre>!"#$%&amp;'()*+,-./0123456789:;&lt;=&gt;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~</pre>
+
+<p>Repeated critical chars: [[[]]] {{{|}}} |||^^^\\\~~~</p>
+<p>Nested: {[({[({|})]})]}</p>
+<p>Escaped HTML in text: &lt;script&gt;alert("xss")&lt;/script&gt;</p>
+<p>Null byte should not appear in valid HTML.</p>
+
+<hr>
+<footer>
+<p><small>Generated for ufsd-utils IBM-1047 roundtrip verification.</small></p>
+</footer>
+</body>
+</html>

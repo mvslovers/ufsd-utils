@@ -194,6 +194,33 @@ func TestDuplicateNameFails(t *testing.T) {
 	}
 }
 
+// TestFreeInodeCachePopulated verifies that Create() populates the
+// superblock free inode cache (fixes UFSD seeing 0 free inodes).
+func TestFreeInodeCachePopulated(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	sb := img.SB()
+	if sb.NFreeInode == 0 {
+		t.Fatal("NFreeInode = 0 in superblock (free inode cache not populated)")
+	}
+	// First free inode should be 3 (0=reserved, 1=BALBLK, 2=root)
+	if sb.FreeInode[0] != 3 {
+		t.Errorf("FreeInode[0] = %d, want 3", sb.FreeInode[0])
+	}
+	// NFreeInode should be > 0 and <= MaxFreeInode
+	if sb.NFreeInode > MaxFreeInode {
+		t.Errorf("NFreeInode = %d, exceeds MaxFreeInode = %d",
+			sb.NFreeInode, MaxFreeInode)
+	}
+	// All cached inodes should be valid (> BALBLK)
+	for i := uint32(0); i < sb.NFreeInode; i++ {
+		if sb.FreeInode[i] <= InodeBALBLK {
+			t.Errorf("FreeInode[%d] = %d (should be > %d)", i, sb.FreeInode[i], InodeBALBLK)
+		}
+	}
+}
+
 func TestResolvePathDotDot(t *testing.T) {
 	img, _ := tempImage(t, 1024*1024, 4096)
 	defer img.Close()

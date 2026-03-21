@@ -133,7 +133,12 @@ func Create(path string, sizeBytes int64, blkSize uint32, inodePct float64,
 		return nil, fmt.Errorf("root dir: %w", err)
 	}
 
-	// Phase 6: Write final superblock
+	// Phase 6: Populate free inode cache in superblock
+	// UFSD reads s_ninode/s_inode[] from the superblock at mount time.
+	// Without this, UFSD sees 0 free inodes and rejects FOPEN.
+	img.seedFreeInodeCache()
+
+	// Phase 7: Write final superblock
 	if err := img.writeSuperBlock(); err != nil {
 		img.Close()
 		os.Remove(path)
@@ -486,4 +491,40 @@ func (img *Image) createRootDir(owner, group string) error {
 	copy(dirBuf[68:], ebcdic.Encode("..", 60))
 
 	return img.WriteSector(rootBlock, dirBuf)
+}
+
+// seedFreeInodeCache scans the inode list and fills the superblock's
+// free inode cache (s_ninode / s_inode[]). Must be called after
+// createRootDir so that allocated inodes (0, 1, 2) are already marked.
+func (img *Image) seedFreeInodeCache() {
+	sb := &img.sb
+	sb.NFreeInode = 0
+
+	ipb := sb.InodesPerBlock
+	buf := make([]byte, img.blkSize)
+
+	for sector := sb.IListSector; sector < sb.DataBlockStart; sector++ {
+		if err := img.ReadSector(sector, buf); err != nil {
+			continue
+		}
+		for i := uint32(0); i < ipb; i++ {
+			off := i * InodeSize
+			mode := be.Uint16(buf[off:])
+			// Reserved inodes 0,1 are filled with 0xFF, skip them
+			if mode != 0 {
+				continue
+			}
+
+			ino := (sector-sb.IListSector)*ipb + i + 1
+			if ino <= InodeBALBLK {
+				continue
+			}
+
+			sb.FreeInode[sb.NFreeInode] = ino
+			sb.NFreeInode++
+			if sb.NFreeInode >= MaxFreeInode {
+				return
+			}
+		}
+	}
 }
