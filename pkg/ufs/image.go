@@ -93,7 +93,7 @@ func Create(path string, sizeBytes int64, blkSize uint32, inodePct float64,
 		DataBlockStart: dataBlockStart,
 		VolumeSize:     totalBlocks,
 		TotalFreeBlock: totalBlocks - dataBlockStart,
-		TotalFreeInode: inodeBlocks*inodesPerBlock - 2, // minus reserved inodes 0,1
+		TotalFreeInode: inodeBlocks*inodesPerBlock - 1, // minus BALBLK (inode 1); inode 0 has no physical slot
 		InodesPerBlock: inodesPerBlock,
 		BlkSizeShift:   shift,
 		IListSector:    IListSector,
