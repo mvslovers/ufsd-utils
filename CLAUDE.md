@@ -52,7 +52,6 @@ Key facts:
 - **Single indirect supported** — `CreateFile`/`ReadFileData` support
   addr[0..15] (direct) + addr[16] (single indirect), up to ~4 MB at 4096.
   Double/triple indirect addressing (addr[17..18]) is not yet implemented.
-- **No delete** — `rm` / `unlink` not implemented (no block/inode deallocation)
 - **No overwrite** — `CreateFile` fails if the name already exists
 - **No fsck** — no consistency checker yet
 
@@ -65,6 +64,7 @@ ufsd-utils ls [-l] <image[:/path]>                     List directory
 ufsd-utils cp [-r] [-t|-b] <src> <dst>                 Copy host↔image
 ufsd-utils cat [-b] <image[:/path]>                    Print file content
 ufsd-utils mkdir [-p] <image[:/path]>                  Create directory
+ufsd-utils rm   [-r]  <image[:/path]>                  Remove file or directory
 ```
 
 Image paths accept: `img`, `img:`, `img:/`, `img:/path` — without path

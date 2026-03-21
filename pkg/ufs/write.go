@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/mvslovers/ufsd-utils/pkg/ebcdic"
 )
 
 // MkDir creates a new directory at the given path.
@@ -435,6 +437,184 @@ func (img *Image) addDirEntry(dirIno uint32, name string, childIno uint32) error
 	di.FileSize += img.blkSize
 	di.MTime = TimeNow()
 	return img.WriteInode(dirIno, di)
+}
+
+// Remove deletes a file from the image.
+// Returns an error if the path is a directory (use RemoveAll for that).
+func (img *Image) Remove(filePath string) error {
+	parentPath, name := splitPath(filePath)
+	if name == "" {
+		return fmt.Errorf("cannot remove root directory")
+	}
+
+	parentIno, err := img.ResolvePath(parentPath)
+	if err != nil {
+		return fmt.Errorf("parent %q: %w", parentPath, err)
+	}
+
+	ino, err := img.ResolvePath(filePath)
+	if err != nil {
+		return fmt.Errorf("%q: %w", filePath, err)
+	}
+
+	di, err := img.ReadInode(ino)
+	if err != nil {
+		return err
+	}
+	if di.Mode&IFMT == IFDIR {
+		return fmt.Errorf("%q is a directory (use rm -r)", filePath)
+	}
+
+	if err := img.freeFileBlocks(di); err != nil {
+		return fmt.Errorf("free blocks: %w", err)
+	}
+	if err := img.FreeInode(ino); err != nil {
+		return fmt.Errorf("free inode: %w", err)
+	}
+	if err := img.removeDirEntry(parentIno, name); err != nil {
+		return fmt.Errorf("remove dir entry: %w", err)
+	}
+
+	return img.FlushSuperBlock()
+}
+
+// RemoveAll deletes a file or directory tree recursively.
+func (img *Image) RemoveAll(targetPath string) error {
+	parentPath, name := splitPath(targetPath)
+	if name == "" {
+		return fmt.Errorf("cannot remove root directory")
+	}
+
+	parentIno, err := img.ResolvePath(parentPath)
+	if err != nil {
+		return fmt.Errorf("parent %q: %w", parentPath, err)
+	}
+
+	ino, err := img.ResolvePath(targetPath)
+	if err != nil {
+		return fmt.Errorf("%q: %w", targetPath, err)
+	}
+
+	di, err := img.ReadInode(ino)
+	if err != nil {
+		return err
+	}
+
+	if di.Mode&IFMT != IFDIR {
+		// Regular file — just remove it
+		return img.Remove(targetPath)
+	}
+
+	// Directory — remove children first (skip . and ..)
+	entries, err := img.ReadDir(ino)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		childName := e.NameString()
+		if childName == "." || childName == ".." {
+			continue
+		}
+		childPath := targetPath
+		if !strings.HasSuffix(childPath, "/") {
+			childPath += "/"
+		}
+		childPath += childName
+
+		if err := img.RemoveAll(childPath); err != nil {
+			return fmt.Errorf("remove %q: %w", childPath, err)
+		}
+	}
+
+	// Now remove the empty directory itself
+	if err := img.freeFileBlocks(di); err != nil {
+		return fmt.Errorf("free dir blocks: %w", err)
+	}
+	if err := img.FreeInode(ino); err != nil {
+		return fmt.Errorf("free dir inode: %w", err)
+	}
+	if err := img.removeDirEntry(parentIno, name); err != nil {
+		return fmt.Errorf("remove dir entry: %w", err)
+	}
+
+	return img.FlushSuperBlock()
+}
+
+// freeFileBlocks returns all data blocks of an inode to the free block chain.
+// Handles direct blocks and single indirect blocks.
+func (img *Image) freeFileBlocks(di *DiskInode) error {
+	// Free direct blocks
+	for i := 0; i < NAddrDirect; i++ {
+		if di.Addr[i] != 0 {
+			if err := img.FreeBlock(di.Addr[i]); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Free single indirect blocks
+	if di.Addr[NAddrIndex1] != 0 {
+		indBuf := make([]byte, img.blkSize)
+		if err := img.ReadSector(di.Addr[NAddrIndex1], indBuf); err != nil {
+			return err
+		}
+		indirectCap := img.blkSize / 4
+		for idx := uint32(0); idx < indirectCap; idx++ {
+			block := be.Uint32(indBuf[idx*4:])
+			if block == 0 {
+				break
+			}
+			if err := img.FreeBlock(block); err != nil {
+				return err
+			}
+		}
+		// Free the indirect block itself
+		if err := img.FreeBlock(di.Addr[NAddrIndex1]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// removeDirEntry removes a directory entry by name from the given directory.
+func (img *Image) removeDirEntry(dirIno uint32, name string) error {
+	di, err := img.ReadInode(dirIno)
+	if err != nil {
+		return err
+	}
+
+	nde := img.blkSize / DirentSize
+	nBlocks := (di.FileSize + img.blkSize - 1) / img.blkSize
+	buf := make([]byte, img.blkSize)
+
+	for i := uint32(0); i < nBlocks && i < NAddrDirect; i++ {
+		if di.Addr[i] == 0 {
+			continue
+		}
+		if err := img.ReadSector(di.Addr[i], buf); err != nil {
+			continue
+		}
+		for j := uint32(0); j < nde; j++ {
+			off := j * DirentSize
+			ino := be.Uint32(buf[off:])
+			if ino == 0 {
+				continue
+			}
+			entryName := decodeEntryName(buf[off+4 : off+64])
+			if entryName == name {
+				// Zero out the inode number to mark as deleted
+				be.PutUint32(buf[off:], 0)
+				return img.WriteSector(di.Addr[i], buf)
+			}
+		}
+	}
+	return fmt.Errorf("entry %q not found", name)
+}
+
+// decodeEntryName extracts the filename from a 60-byte EBCDIC name field.
+func decodeEntryName(b []byte) string {
+	return ebcdic.Decode(b)
 }
 
 // splitPath returns the parent path and the final component.

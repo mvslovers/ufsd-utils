@@ -345,6 +345,137 @@ func TestFileTooLargeForSingleIndirect(t *testing.T) {
 	}
 }
 
+// TestRemoveFile verifies that Remove deletes a file and frees blocks/inodes.
+func TestRemoveFile(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	data := []byte("delete me")
+	if err := img.CreateFile("/delete.txt", data); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+
+	sbBefore := img.SB()
+
+	if err := img.Remove("/delete.txt"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// File should no longer be resolvable
+	if _, err := img.ResolvePath("/delete.txt"); err == nil {
+		t.Error("file still exists after Remove")
+	}
+
+	// Free blocks and inodes should have increased
+	sbAfter := img.SB()
+	if sbAfter.TotalFreeBlock <= sbBefore.TotalFreeBlock {
+		t.Errorf("TotalFreeBlock did not increase: before=%d, after=%d",
+			sbBefore.TotalFreeBlock, sbAfter.TotalFreeBlock)
+	}
+	if sbAfter.TotalFreeInode <= sbBefore.TotalFreeInode {
+		t.Errorf("TotalFreeInode did not increase: before=%d, after=%d",
+			sbBefore.TotalFreeInode, sbAfter.TotalFreeInode)
+	}
+}
+
+// TestRemoveDirectoryFails verifies that Remove rejects directories.
+func TestRemoveDirectoryFails(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	if err := img.MkDir("/mydir"); err != nil {
+		t.Fatalf("MkDir: %v", err)
+	}
+	if err := img.Remove("/mydir"); err == nil {
+		t.Error("Remove should fail on a directory")
+	}
+}
+
+// TestRemoveRootFails verifies that root cannot be removed.
+func TestRemoveRootFails(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	if err := img.Remove("/"); err == nil {
+		t.Error("Remove(/) should fail")
+	}
+	if err := img.RemoveAll("/"); err == nil {
+		t.Error("RemoveAll(/) should fail")
+	}
+}
+
+// TestRemoveAllRecursive verifies recursive directory deletion.
+func TestRemoveAllRecursive(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	// Create a directory tree with files
+	if err := img.MkDirAll("/a/b"); err != nil {
+		t.Fatalf("MkDirAll: %v", err)
+	}
+	if err := img.CreateFile("/a/file1.txt", []byte("one")); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+	if err := img.CreateFile("/a/b/file2.txt", []byte("two")); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+
+	sbBefore := img.SB()
+
+	if err := img.RemoveAll("/a"); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+
+	// Everything under /a should be gone
+	if _, err := img.ResolvePath("/a"); err == nil {
+		t.Error("/a still exists")
+	}
+	if _, err := img.ResolvePath("/a/file1.txt"); err == nil {
+		t.Error("/a/file1.txt still exists")
+	}
+	if _, err := img.ResolvePath("/a/b"); err == nil {
+		t.Error("/a/b still exists")
+	}
+
+	// Free counts should have increased
+	sbAfter := img.SB()
+	if sbAfter.TotalFreeBlock <= sbBefore.TotalFreeBlock {
+		t.Errorf("TotalFreeBlock did not increase: before=%d, after=%d",
+			sbBefore.TotalFreeBlock, sbAfter.TotalFreeBlock)
+	}
+	if sbAfter.TotalFreeInode <= sbBefore.TotalFreeInode {
+		t.Errorf("TotalFreeInode did not increase: before=%d, after=%d",
+			sbBefore.TotalFreeInode, sbAfter.TotalFreeInode)
+	}
+}
+
+// TestRemoveAndRecreate verifies that freed space can be reused.
+func TestRemoveAndRecreate(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	data := []byte("hello world")
+	if err := img.CreateFile("/test.txt", data); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+	if err := img.Remove("/test.txt"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// Should be able to recreate the same file
+	if err := img.CreateFile("/test.txt", data); err != nil {
+		t.Fatalf("re-CreateFile: %v", err)
+	}
+	ino, _ := img.ResolvePath("/test.txt")
+	got, err := img.ReadFileData(ino)
+	if err != nil {
+		t.Fatalf("ReadFileData: %v", err)
+	}
+	if string(got) != string(data) {
+		t.Errorf("got %q, want %q", got, data)
+	}
+}
+
 // TestOwnerGroupInheritance verifies that MkDir and CreateFile inherit
 // owner/group from the parent directory (set via Create).
 func TestOwnerGroupInheritance(t *testing.T) {
