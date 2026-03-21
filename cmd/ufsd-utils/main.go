@@ -63,8 +63,9 @@ Commands:
 Examples:
   ufsd-utils create httpd-web.img --size 10M
   ufsd-utils info   httpd-web.img
-  ufsd-utils ls -l  httpd-web.img /
-  ufsd-utils mkdir  httpd-web.img /css
+  ufsd-utils ls -l  httpd-web.img
+  ufsd-utils ls -l  httpd-web.img:/css
+  ufsd-utils mkdir  httpd-web.img:/css
   ufsd-utils cp     ./index.html httpd-web.img:/index.html
   ufsd-utils cp -r  ./webroot/   httpd-web.img:/
   ufsd-utils cp     httpd-web.img:/index.html ./out.html
@@ -220,7 +221,7 @@ func cmdInfo(args []string) {
 func cmdLs(args []string) {
 	fs := flag.NewFlagSet("ls", flag.ExitOnError)
 	long := fs.Bool("l", false, "Long format")
-	fs.Usage = func() { fmt.Print("Usage: ufsd-utils ls [-l] <image-file> [path]\n") }
+	fs.Usage = func() { fmt.Print("Usage: ufsd-utils ls [-l] <image[:/path]>\n") }
 	fs.Parse(reorderArgs(args))
 
 	if fs.NArg() < 1 {
@@ -228,8 +229,8 @@ func cmdLs(args []string) {
 		os.Exit(1)
 	}
 
-	imgPath := fs.Arg(0)
-	dirPath := "/"
+	imgPath, dirPath := parseImagePath(fs.Arg(0))
+	// Support legacy two-arg form: ls image.img /path
 	if fs.NArg() > 1 {
 		dirPath = fs.Arg(1)
 	}
@@ -469,7 +470,7 @@ func cpImageToHost(imgFile, imgPath, hostPath string, textMode, binaryMode bool)
 func cmdCat(args []string) {
 	fs := flag.NewFlagSet("cat", flag.ExitOnError)
 	binary := fs.Bool("b", false, "Binary mode: no EBCDIC->ASCII conversion")
-	fs.Usage = func() { fmt.Print("Usage: ufsd-utils cat [-b] <image.img:/path>\n") }
+	fs.Usage = func() { fmt.Print("Usage: ufsd-utils cat [-b] <image[:/path]>\n") }
 	fs.Parse(reorderArgs(args))
 
 	if fs.NArg() < 1 {
@@ -477,10 +478,7 @@ func cmdCat(args []string) {
 		os.Exit(1)
 	}
 
-	imgFile, imgPath := parseImgPath(fs.Arg(0))
-	if imgFile == "" {
-		die("argument must be image path (image.img:/path)")
-	}
+	imgFile, imgPath := parseImagePath(fs.Arg(0))
 
 	img, err := ufs.Open(imgFile, true)
 	if err != nil {
@@ -512,7 +510,7 @@ func cmdMkdir(args []string) {
 	parents := fs.Bool("p", false, "Create parent directories as needed")
 	owner := fs.String("owner", "", "Directory owner (default: current user)")
 	group := fs.String("group", "", "Directory group (default: ADMIN)")
-	fs.Usage = func() { fmt.Print("Usage: ufsd-utils mkdir [-p] [--owner X] [--group X] <image.img:/path>\n") }
+	fs.Usage = func() { fmt.Print("Usage: ufsd-utils mkdir [-p] [--owner X] [--group X] <image[:/path]>\n") }
 	fs.Parse(reorderArgs(args))
 
 	if *owner == "" {
@@ -527,10 +525,7 @@ func cmdMkdir(args []string) {
 		os.Exit(1)
 	}
 
-	imgFile, imgPath := parseImgPath(fs.Arg(0))
-	if imgFile == "" {
-		die("argument must be image path (image.img:/path)")
-	}
+	imgFile, imgPath := parseImagePath(fs.Arg(0))
 
 	img, err := ufs.Open(imgFile, false)
 	if err != nil {
@@ -551,20 +546,40 @@ func cmdMkdir(args []string) {
 
 // --- helpers ---
 
-// parseImgPath splits "image.img:/path" into ("image.img", "/path").
-// Returns ("", arg) if no colon-separator found.
-func parseImgPath(arg string) (string, string) {
-	// Look for the pattern: something.img:/path or something:/path
-	// Avoid matching C:\path on Windows
-	idx := strings.Index(arg, ":/")
+// parseImagePath splits an image path argument into image file and internal path.
+// Used by commands where the argument is always an image (ls, cat, mkdir).
+// Handles all forms: "img", "img:", "img:/", "img:/path".
+func parseImagePath(arg string) (string, string) {
+	idx := strings.Index(arg, ":")
 	if idx < 1 {
-		// Also try just ":" at end (e.g. "img.img:")
-		if strings.HasSuffix(arg, ":") {
-			return arg[:len(arg)-1], "/"
-		}
+		return arg, "/"
+	}
+	p := arg[idx+1:]
+	if p == "" || p == "/" {
+		return arg[:idx], "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return arg[:idx], p
+}
+
+// parseImgPath splits "image.img:/path" into ("image.img", "/path").
+// Returns ("", arg) if no colon-separator found. Used by cp where the
+// colon distinguishes image paths from host paths.
+func parseImgPath(arg string) (string, string) {
+	idx := strings.Index(arg, ":")
+	if idx < 1 {
 		return "", arg
 	}
-	return arg[:idx], arg[idx+1:]
+	p := arg[idx+1:]
+	if p == "" || p == "/" {
+		return arg[:idx], "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return arg[:idx], p
 }
 
 // shouldConvertText returns true if the file should be converted between
