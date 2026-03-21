@@ -61,13 +61,15 @@ Key facts:
 ```
 ufsd-utils create  <image> [--size N] [--blksize N]   Create + format image
 ufsd-utils info    <image>                             Show image metadata
-ufsd-utils ls [-l] <image> [path]                      List directory
+ufsd-utils ls [-l] <image[:/path]>                     List directory
 ufsd-utils cp [-r] [-t|-b] <src> <dst>                 Copy host↔image
-ufsd-utils cat [-b] <image:/path>                      Print file content
-ufsd-utils mkdir [-p] <image:/path>                    Create directory
+ufsd-utils cat [-b] <image[:/path]>                    Print file content
+ufsd-utils mkdir [-p] <image[:/path]>                  Create directory
 ```
 
-Image paths use `image.img:/path/in/image` notation.
+Image paths accept: `img`, `img:`, `img:/`, `img:/path` — without path
+defaults to root (/). For `cp`, the colon is required to distinguish
+image paths from host paths.
 Text mode (ASCII↔EBCDIC) is auto-detected by file extension.
 
 ## Coding Rules
