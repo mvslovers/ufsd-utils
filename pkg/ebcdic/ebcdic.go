@@ -5,8 +5,9 @@
 //
 //   - IBM-1047 (default) — z/OS Open Systems / USS / Zowe convention.
 //     Used by HTTPD 4.0 with CODEPAGE IBM1047.
-//     Known asymmetry: ASCII LF (0x0A) → EBCDIC 0x25, but
-//     EBCDIC 0x25 → ASCII 0x85 (NEL, not LF).
+//     Modified: ASCII LF (0x0A) maps to EBCDIC NEL (0x15), not
+//     EBCDIC LF (0x25). This matches the mvslovers convention where
+//     '\n' = 0x15 (c2asm370, crent370, HTTPD etoa).
 //
 //   - CP037 — IBM CECP for US/Canada.
 //     Fully symmetric roundtrip for all 256 byte values.
@@ -167,7 +168,8 @@ func TableEtoA(cp Codepage) [256]byte {
  * Standard for z/OS USS, Zowe, and HTTPD 4.0.
  *
  * Verified: 95/95 printable ASCII roundtrip.
- * Known: NL/LF asymmetry (3 bytes in 0x00-0xFF range).
+ * Modified: AtoE[0x0A] = 0x15 (NEL), not 0x25 (LF).
+ * Matches mvslovers convention ('\n' = 0x15 everywhere).
  *
  * Critical positions for HTML/CSS/JS:
  *   [ = 0xAD    ] = 0xBD    | = 0x4F
@@ -177,7 +179,7 @@ func TableEtoA(cp Codepage) [256]byte {
 
 var ibm1047AtoE = [256]byte{
 	/* 0x00-0x07 */ 0x00, 0x01, 0x02, 0x03, 0x37, 0x2D, 0x2E, 0x2F,
-	/* 0x08-0x0F */ 0x16, 0x05, 0x25, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+	/* 0x08-0x0F */ 0x16, 0x05, 0x15, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
 	/* 0x10-0x17 */ 0x10, 0x11, 0x12, 0x13, 0x3C, 0x3D, 0x32, 0x26,
 	/* 0x18-0x1F */ 0x18, 0x19, 0x3F, 0x27, 0x1C, 0x1D, 0x1E, 0x1F,
 	/* 0x20-0x27  sp !  "  #  $  %  &  '  */
