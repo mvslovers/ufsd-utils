@@ -66,6 +66,7 @@ ufsd-utils cat [-b] <image[:/path]>                    Print file content
 ufsd-utils mkdir [-p] <image[:/path]>                  Create directory
 ufsd-utils rm   [-r]  <image[:/path]>                  Remove file or directory
 ufsd-utils rmdir      <image[:/path]>                  Remove empty directory
+ufsd-utils upload     <image> --dsn DSN                Upload image to MVS
 ```
 
 Image paths accept: `img`, `img:`, `img:/`, `img:/path` — without path
