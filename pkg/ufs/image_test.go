@@ -476,6 +476,61 @@ func TestRemoveAndRecreate(t *testing.T) {
 	}
 }
 
+// TestRemoveDirEmpty verifies that RemoveDir deletes an empty directory.
+func TestRemoveDirEmpty(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	if err := img.MkDir("/emptydir"); err != nil {
+		t.Fatalf("MkDir: %v", err)
+	}
+	if err := img.RemoveDir("/emptydir"); err != nil {
+		t.Fatalf("RemoveDir: %v", err)
+	}
+	if _, err := img.ResolvePath("/emptydir"); err == nil {
+		t.Error("/emptydir still exists after RemoveDir")
+	}
+}
+
+// TestRemoveDirNotEmpty verifies that RemoveDir rejects non-empty directories.
+func TestRemoveDirNotEmpty(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	if err := img.MkDir("/dir"); err != nil {
+		t.Fatalf("MkDir: %v", err)
+	}
+	if err := img.CreateFile("/dir/file.txt", []byte("x")); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+	if err := img.RemoveDir("/dir"); err == nil {
+		t.Error("RemoveDir should fail on non-empty directory")
+	}
+}
+
+// TestRemoveDirOnFile verifies that RemoveDir rejects files.
+func TestRemoveDirOnFile(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	if err := img.CreateFile("/file.txt", []byte("x")); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+	if err := img.RemoveDir("/file.txt"); err == nil {
+		t.Error("RemoveDir should fail on a file")
+	}
+}
+
+// TestRemoveDirRoot verifies that RemoveDir rejects root.
+func TestRemoveDirRoot(t *testing.T) {
+	img, _ := tempImage(t, 1024*1024, 4096)
+	defer img.Close()
+
+	if err := img.RemoveDir("/"); err == nil {
+		t.Error("RemoveDir(/) should fail")
+	}
+}
+
 // TestOwnerGroupInheritance verifies that MkDir and CreateFile inherit
 // owner/group from the parent directory (set via Create).
 func TestOwnerGroupInheritance(t *testing.T) {

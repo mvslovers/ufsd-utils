@@ -65,6 +65,7 @@ ufsd-utils cp [-r] [-t|-b] <src> <dst>                 Copy host↔image
 ufsd-utils cat [-b] <image[:/path]>                    Print file content
 ufsd-utils mkdir [-p] <image[:/path]>                  Create directory
 ufsd-utils rm   [-r]  <image[:/path]>                  Remove file or directory
+ufsd-utils rmdir      <image[:/path]>                  Remove empty directory
 ```
 
 Image paths accept: `img`, `img:`, `img:/`, `img:/path` — without path

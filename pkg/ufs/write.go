@@ -478,6 +478,57 @@ func (img *Image) Remove(filePath string) error {
 	return img.FlushSuperBlock()
 }
 
+// RemoveDir deletes an empty directory from the image.
+// Returns an error if the directory is not empty, is the root, or is not a directory.
+func (img *Image) RemoveDir(dirPath string) error {
+	parentPath, name := splitPath(dirPath)
+	if name == "" {
+		return fmt.Errorf("cannot remove root directory")
+	}
+
+	parentIno, err := img.ResolvePath(parentPath)
+	if err != nil {
+		return fmt.Errorf("parent %q: %w", parentPath, err)
+	}
+
+	ino, err := img.ResolvePath(dirPath)
+	if err != nil {
+		return fmt.Errorf("%q: %w", dirPath, err)
+	}
+
+	di, err := img.ReadInode(ino)
+	if err != nil {
+		return err
+	}
+	if di.Mode&IFMT != IFDIR {
+		return fmt.Errorf("%q is not a directory", dirPath)
+	}
+
+	// Check directory is empty (only . and ..)
+	entries, err := img.ReadDir(ino)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		n := e.NameString()
+		if n != "." && n != ".." {
+			return fmt.Errorf("directory %q is not empty", dirPath)
+		}
+	}
+
+	if err := img.freeFileBlocks(di); err != nil {
+		return fmt.Errorf("free blocks: %w", err)
+	}
+	if err := img.FreeInode(ino); err != nil {
+		return fmt.Errorf("free inode: %w", err)
+	}
+	if err := img.removeDirEntry(parentIno, name); err != nil {
+		return fmt.Errorf("remove dir entry: %w", err)
+	}
+
+	return img.FlushSuperBlock()
+}
+
 // RemoveAll deletes a file or directory tree recursively.
 func (img *Image) RemoveAll(targetPath string) error {
 	parentPath, name := splitPath(targetPath)
