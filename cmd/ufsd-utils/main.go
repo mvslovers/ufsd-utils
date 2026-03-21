@@ -284,8 +284,6 @@ func cmdCp(args []string) {
 	recursive := fs.Bool("r", false, "Copy directories recursively")
 	text := fs.Bool("t", false, "Text mode: convert ASCII<->EBCDIC (auto-detected by extension if not set)")
 	binary := fs.Bool("b", false, "Binary mode: no conversion")
-	owner := fs.String("owner", "", "Owner for created files (default: current user)")
-	group := fs.String("group", "", "Group for created files (default: ADMIN)")
 
 	fs.Usage = func() {
 		fmt.Print(`Usage:
@@ -293,6 +291,7 @@ func cmdCp(args []string) {
 
 Copy files between host filesystem and UFS370 disk image.
 Image paths use the format: image.img:/path/in/image
+Owner/group are inherited from the target directory in the image.
 
 Directions:
   host -> image:  ufsd-utils cp ./file.html image.img:/file.html
@@ -309,13 +308,6 @@ Options:
 		fs.PrintDefaults()
 	}
 	fs.Parse(reorderArgs(args))
-
-	if *owner == "" {
-		*owner = currentUser()
-	}
-	if *group == "" {
-		*group = "ADMIN"
-	}
 
 	if fs.NArg() < 2 {
 		fs.Usage()
@@ -337,14 +329,14 @@ Options:
 
 	if dstImg != "" {
 		// Host -> Image
-		cpHostToImage(src, dstImg, dstPath, *recursive, *text, *binary, *owner, *group)
+		cpHostToImage(src, dstImg, dstPath, *recursive, *text, *binary)
 	} else {
 		// Image -> Host
 		cpImageToHost(srcImg, srcPath, dst, *text, *binary)
 	}
 }
 
-func cpHostToImage(hostPath, imgFile, imgPath string, recursive, textMode, binaryMode bool, owner, group string) {
+func cpHostToImage(hostPath, imgFile, imgPath string, recursive, textMode, binaryMode bool) {
 	img, err := ufs.Open(imgFile, false)
 	if err != nil {
 		die("%v", err)
@@ -360,7 +352,7 @@ func cpHostToImage(hostPath, imgFile, imgPath string, recursive, textMode, binar
 		if !recursive {
 			die("%s is a directory (use -r)", hostPath)
 		}
-		cpDirToImage(img, hostPath, imgPath, textMode, binaryMode, owner, group, "")
+		cpDirToImage(img, hostPath, imgPath, textMode, binaryMode, "")
 		return
 	}
 
@@ -379,13 +371,13 @@ func cpHostToImage(hostPath, imgFile, imgPath string, recursive, textMode, binar
 		imgPath = imgPath + filepath_base(hostPath)
 	}
 
-	if err := img.CreateFile(imgPath, data, owner, group); err != nil {
+	if err := img.CreateFile(imgPath, data); err != nil {
 		die("create %s: %v", imgPath, err)
 	}
 	fmt.Printf("  %s -> %s:%s (%d bytes)\n", hostPath, img.Path(), imgPath, len(data))
 }
 
-func cpDirToImage(img *ufs.Image, hostDir, imgDir string, textMode, binaryMode bool, owner, group, indent string) {
+func cpDirToImage(img *ufs.Image, hostDir, imgDir string, textMode, binaryMode bool, indent string) {
 	entries, err := os.ReadDir(hostDir)
 	if err != nil {
 		die("read dir %s: %v", hostDir, err)
@@ -393,7 +385,7 @@ func cpDirToImage(img *ufs.Image, hostDir, imgDir string, textMode, binaryMode b
 
 	// Ensure target directory exists
 	if imgDir != "/" {
-		img.MkDirAll(imgDir, owner, group)
+		img.MkDirAll(imgDir)
 	}
 
 	for _, e := range entries {
@@ -406,11 +398,11 @@ func cpDirToImage(img *ufs.Image, hostDir, imgDir string, textMode, binaryMode b
 
 		if e.IsDir() {
 			fmt.Printf("%s  mkdir %s\n", indent, imgPath)
-			if err := img.MkDirAll(imgPath, owner, group); err != nil {
+			if err := img.MkDirAll(imgPath); err != nil {
 				fmt.Fprintf(os.Stderr, "  warning: mkdir %s: %v\n", imgPath, err)
 				continue
 			}
-			cpDirToImage(img, hostPath, imgPath, textMode, binaryMode, owner, group, indent+"  ")
+			cpDirToImage(img, hostPath, imgPath, textMode, binaryMode, indent+"  ")
 			continue
 		}
 
@@ -425,7 +417,7 @@ func cpDirToImage(img *ufs.Image, hostDir, imgDir string, textMode, binaryMode b
 			ebcdic.EncodeBytes(data)
 		}
 
-		if err := img.CreateFile(imgPath, data, owner, group); err != nil {
+		if err := img.CreateFile(imgPath, data); err != nil {
 			fmt.Fprintf(os.Stderr, "  warning: create %s: %v\n", imgPath, err)
 			continue
 		}
@@ -508,17 +500,8 @@ func cmdCat(args []string) {
 func cmdMkdir(args []string) {
 	fs := flag.NewFlagSet("mkdir", flag.ExitOnError)
 	parents := fs.Bool("p", false, "Create parent directories as needed")
-	owner := fs.String("owner", "", "Directory owner (default: current user)")
-	group := fs.String("group", "", "Directory group (default: ADMIN)")
-	fs.Usage = func() { fmt.Print("Usage: ufsd-utils mkdir [-p] [--owner X] [--group X] <image[:/path]>\n") }
+	fs.Usage = func() { fmt.Print("Usage: ufsd-utils mkdir [-p] <image[:/path]>\n") }
 	fs.Parse(reorderArgs(args))
-
-	if *owner == "" {
-		*owner = currentUser()
-	}
-	if *group == "" {
-		*group = "ADMIN"
-	}
 
 	if fs.NArg() < 1 {
 		fs.Usage()
@@ -534,9 +517,9 @@ func cmdMkdir(args []string) {
 	defer img.Close()
 
 	if *parents {
-		err = img.MkDirAll(imgPath, *owner, *group)
+		err = img.MkDirAll(imgPath)
 	} else {
-		err = img.MkDir(imgPath, *owner, *group)
+		err = img.MkDir(imgPath)
 	}
 	if err != nil {
 		die("%v", err)

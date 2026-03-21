@@ -7,8 +7,9 @@ import (
 )
 
 // MkDir creates a new directory at the given path.
+// Owner and group are inherited from the parent directory.
 // Parent directories must already exist.
-func (img *Image) MkDir(dirPath, owner, group string) error {
+func (img *Image) MkDir(dirPath string) error {
 	parentPath, name := splitPath(dirPath)
 	if name == "" {
 		return fmt.Errorf("invalid path: %q", dirPath)
@@ -66,7 +67,7 @@ func (img *Image) MkDir(dirPath, owner, group string) error {
 		return fmt.Errorf("write dir block: %w", err)
 	}
 
-	// Write new directory inode
+	// Write new directory inode — inherit owner/group from parent
 	di := &DiskInode{
 		Mode:     IFDIR | DefaultUmask,
 		NLink:    2,
@@ -75,8 +76,8 @@ func (img *Image) MkDir(dirPath, owner, group string) error {
 		MTime:    now,
 		ATime:    now,
 	}
-	copy(di.Owner[:], encodeOwner(owner))
-	copy(di.Group[:], encodeOwner(group))
+	di.Owner = parentDi.Owner
+	di.Group = parentDi.Group
 	di.Addr[0] = block
 
 	if err := img.WriteInode(ino, di); err != nil {
@@ -92,9 +93,8 @@ func (img *Image) MkDir(dirPath, owner, group string) error {
 }
 
 // MkDirAll creates a directory and all missing parent directories,
-// similar to `mkdir -p`.
-func (img *Image) MkDirAll(dirPath, owner, group string) error {
-	// Walk path components, create each if missing
+// similar to `mkdir -p`. Owner/group inherited from each parent.
+func (img *Image) MkDirAll(dirPath string) error {
 	parts := strings.Split(strings.Trim(dirPath, "/"), "/")
 	current := "/"
 
@@ -107,11 +107,9 @@ func (img *Image) MkDirAll(dirPath, owner, group string) error {
 			next = "/" + next
 		}
 
-		// Check if it exists
 		_, err := img.ResolvePath(next)
 		if err != nil {
-			// Doesn't exist — create it
-			if err := img.MkDir(next, owner, group); err != nil {
+			if err := img.MkDir(next); err != nil {
 				return err
 			}
 		}
@@ -121,8 +119,9 @@ func (img *Image) MkDirAll(dirPath, owner, group string) error {
 }
 
 // CreateFile creates a new file and writes the given data.
+// Owner and group are inherited from the parent directory.
 // Parent directory must exist.
-func (img *Image) CreateFile(filePath string, data []byte, owner, group string) error {
+func (img *Image) CreateFile(filePath string, data []byte) error {
 	parentPath, name := splitPath(filePath)
 	if name == "" {
 		return fmt.Errorf("invalid path: %q", filePath)
@@ -188,8 +187,8 @@ func (img *Image) CreateFile(filePath string, data []byte, owner, group string) 
 		MTime:    now,
 		ATime:    now,
 	}
-	copy(di.Owner[:], encodeOwner(owner))
-	copy(di.Group[:], encodeOwner(group))
+	di.Owner = parentDi.Owner
+	di.Group = parentDi.Group
 
 	buf := make([]byte, img.blkSize)
 	written := uint32(0)
