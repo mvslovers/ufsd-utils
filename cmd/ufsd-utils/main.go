@@ -35,6 +35,8 @@ func main() {
 		cmdMkdir(os.Args[2:])
 	case "rm":
 		cmdRm(os.Args[2:])
+	case "rmdir":
+		cmdRmdir(os.Args[2:])
 	case "version":
 		fmt.Printf("ufsd-utils %s\n", version)
 	case "help", "-h", "--help":
@@ -60,6 +62,7 @@ Commands:
   cat      Display file contents from image
   mkdir    Create directory in image
   rm       Remove file or directory from image
+  rmdir    Remove empty directory from image
   version  Show version
   help     Show this help
 
@@ -557,6 +560,32 @@ func cmdRm(args []string) {
 		err = img.Remove(imgPath)
 	}
 	if err != nil {
+		die("%v", err)
+	}
+	fmt.Printf("  removed %s\n", imgPath)
+}
+
+// --- rmdir ---
+
+func cmdRmdir(args []string) {
+	fs := flag.NewFlagSet("rmdir", flag.ExitOnError)
+	fs.Usage = func() { fmt.Print("Usage: ufsd-utils rmdir <image[:/path]>\n") }
+	fs.Parse(reorderArgs(args))
+
+	if fs.NArg() < 1 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	imgFile, imgPath := parseImagePath(fs.Arg(0))
+
+	img, err := ufs.Open(imgFile, false)
+	if err != nil {
+		die("%v", err)
+	}
+	defer img.Close()
+
+	if err := img.RemoveDir(imgPath); err != nil {
 		die("%v", err)
 	}
 	fmt.Printf("  removed %s\n", imgPath)
