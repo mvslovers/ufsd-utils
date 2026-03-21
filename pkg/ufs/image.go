@@ -324,7 +324,7 @@ func (img *Image) ReadDir(dirIno uint32) ([]DirEntry, error) {
 
 // NameString returns the filename from a DirEntry as a Go string (EBCDIC decoded).
 func (de *DirEntry) NameString() string {
-	return ebcdic.DecodeString(de.Name[:])
+	return ebcdic.Decode(de.Name[:])
 }
 
 // --- internal helpers ---
@@ -468,8 +468,8 @@ func (img *Image) createRootDir(owner, group string) error {
 	copy(inodeBuf[off+0x08:], now.Raw[:]) // ctime
 	copy(inodeBuf[off+0x10:], now.Raw[:]) // mtime
 	copy(inodeBuf[off+0x18:], now.Raw[:]) // atime
-	copy(inodeBuf[off+0x20:], ebcdic.EncodeString(owner, 9))
-	copy(inodeBuf[off+0x29:], ebcdic.EncodeString(group, 9))
+	copy(inodeBuf[off+0x20:], ebcdic.Encode(owner, 9))
+	copy(inodeBuf[off+0x29:], ebcdic.Encode(group, 9))
 	be.PutUint32(inodeBuf[off+0x34:], rootBlock) // addr[0]
 
 	if err := img.WriteSector(IListSector, inodeBuf); err != nil {
@@ -480,10 +480,10 @@ func (img *Image) createRootDir(owner, group string) error {
 	dirBuf := make([]byte, img.blkSize)
 	// entry 0: "."
 	be.PutUint32(dirBuf[0:], InodeRoot)
-	copy(dirBuf[4:], ebcdic.EncodeString(".", 60))
+	copy(dirBuf[4:], ebcdic.Encode(".", 60))
 	// entry 1: ".."
 	be.PutUint32(dirBuf[64:], InodeRoot) // root parent is itself
-	copy(dirBuf[68:], ebcdic.EncodeString("..", 60))
+	copy(dirBuf[68:], ebcdic.Encode("..", 60))
 
 	return img.WriteSector(rootBlock, dirBuf)
 }

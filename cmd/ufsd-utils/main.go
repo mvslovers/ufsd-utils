@@ -197,8 +197,8 @@ func cmdInfo(args []string) {
 
 	root, err := img.ReadInode(ufs.InodeRoot)
 	if err == nil {
-		owner := ebcdic.DecodeString(root.Owner[:])
-		group := ebcdic.DecodeString(root.Group[:])
+		owner := ebcdic.Decode(root.Owner[:])
+		group := ebcdic.Decode(root.Group[:])
 		fmt.Println()
 		fmt.Printf("Root inode:      %d\n", ufs.InodeRoot)
 		fmt.Printf("Root owner:      %s\n", owner)
@@ -264,8 +264,8 @@ func cmdLs(args []string) {
 		}
 
 		modeStr := formatMode(di.Mode)
-		owner := ebcdic.DecodeString(di.Owner[:])
-		group := ebcdic.DecodeString(di.Group[:])
+		owner := ebcdic.Decode(di.Owner[:])
+		group := ebcdic.Decode(di.Group[:])
 		mtime := di.MTime.ToGo()
 
 		fmt.Printf("%s %3d %-8s %-8s %10d %s %s\n",
@@ -370,7 +370,7 @@ func cpHostToImage(hostPath, imgFile, imgPath string, recursive, textMode, binar
 	}
 
 	if shouldConvertText(hostPath, textMode, binaryMode) {
-		data = ebcdic.ToEBCDIC(data)
+		ebcdic.EncodeBytes(data)
 	}
 
 	// If imgPath ends with /, append the source filename
@@ -421,7 +421,7 @@ func cpDirToImage(img *ufs.Image, hostDir, imgDir string, textMode, binaryMode b
 
 		isText := shouldConvertText(hostPath, textMode, binaryMode)
 		if isText {
-			data = ebcdic.ToEBCDIC(data)
+			ebcdic.EncodeBytes(data)
 		}
 
 		if err := img.CreateFile(imgPath, data, owner, group); err != nil {
@@ -455,7 +455,7 @@ func cpImageToHost(imgFile, imgPath, hostPath string, textMode, binaryMode bool)
 	}
 
 	if shouldConvertText(imgPath, textMode, binaryMode) {
-		data = ebcdic.ToASCII(data)
+		ebcdic.DecodeBytes(data)
 	}
 
 	if err := os.WriteFile(hostPath, data, 0644); err != nil {
@@ -499,7 +499,7 @@ func cmdCat(args []string) {
 	}
 
 	if !*binary {
-		data = ebcdic.ToASCII(data)
+		ebcdic.DecodeBytes(data)
 	}
 
 	os.Stdout.Write(data)
