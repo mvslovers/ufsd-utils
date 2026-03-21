@@ -78,7 +78,7 @@ func TestCreateFileAndReadBack(t *testing.T) {
 	defer img.Close()
 
 	data := []byte("Hello, UFS370!")
-	if err := img.CreateFile("/test.txt", data, "USR", "GRP"); err != nil {
+	if err := img.CreateFile("/test.txt", data); err != nil {
 		t.Fatalf("CreateFile: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestCreateFileEmptyData(t *testing.T) {
 	img, _ := tempImage(t, 1024*1024, 4096)
 	defer img.Close()
 
-	if err := img.CreateFile("/empty.txt", []byte{}, "USR", "GRP"); err != nil {
+	if err := img.CreateFile("/empty.txt", []byte{}); err != nil {
 		t.Fatalf("CreateFile empty: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestMkDirAndResolve(t *testing.T) {
 	img, _ := tempImage(t, 1024*1024, 4096)
 	defer img.Close()
 
-	if err := img.MkDir("/subdir", "USR", "GRP"); err != nil {
+	if err := img.MkDir("/subdir"); err != nil {
 		t.Fatalf("MkDir: %v", err)
 	}
 
@@ -144,7 +144,7 @@ func TestMkDirAll(t *testing.T) {
 	img, _ := tempImage(t, 1024*1024, 4096)
 	defer img.Close()
 
-	if err := img.MkDirAll("/a/b/c", "USR", "GRP"); err != nil {
+	if err := img.MkDirAll("/a/b/c"); err != nil {
 		t.Fatalf("MkDirAll: %v", err)
 	}
 
@@ -159,12 +159,12 @@ func TestFileInSubdir(t *testing.T) {
 	img, _ := tempImage(t, 1024*1024, 4096)
 	defer img.Close()
 
-	if err := img.MkDir("/web", "USR", "GRP"); err != nil {
+	if err := img.MkDir("/web"); err != nil {
 		t.Fatalf("MkDir: %v", err)
 	}
 
 	data := []byte("<html>test</html>")
-	if err := img.CreateFile("/web/index.html", data, "USR", "GRP"); err != nil {
+	if err := img.CreateFile("/web/index.html", data); err != nil {
 		t.Fatalf("CreateFile: %v", err)
 	}
 
@@ -186,10 +186,10 @@ func TestDuplicateNameFails(t *testing.T) {
 	img, _ := tempImage(t, 1024*1024, 4096)
 	defer img.Close()
 
-	if err := img.CreateFile("/dup.txt", []byte("a"), "USR", "GRP"); err != nil {
+	if err := img.CreateFile("/dup.txt", []byte("a")); err != nil {
 		t.Fatalf("first CreateFile: %v", err)
 	}
-	if err := img.CreateFile("/dup.txt", []byte("b"), "USR", "GRP"); err == nil {
+	if err := img.CreateFile("/dup.txt", []byte("b")); err == nil {
 		t.Error("duplicate CreateFile should fail")
 	}
 }
@@ -225,7 +225,7 @@ func TestResolvePathDotDot(t *testing.T) {
 	img, _ := tempImage(t, 1024*1024, 4096)
 	defer img.Close()
 
-	if err := img.MkDir("/dir1", "USR", "GRP"); err != nil {
+	if err := img.MkDir("/dir1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -252,7 +252,7 @@ func TestCreateLargeFileIndirect(t *testing.T) {
 		data[i] = byte(i % 251) // deterministic pattern
 	}
 
-	if err := img.CreateFile("/large.bin", data, "USR", "GRP"); err != nil {
+	if err := img.CreateFile("/large.bin", data); err != nil {
 		t.Fatalf("CreateFile: %v", err)
 	}
 
@@ -299,7 +299,7 @@ func TestSmallFileNoIndirect(t *testing.T) {
 		data[i] = byte(i % 199)
 	}
 
-	if err := img.CreateFile("/exact16.bin", data, "USR", "GRP"); err != nil {
+	if err := img.CreateFile("/exact16.bin", data); err != nil {
 		t.Fatalf("CreateFile: %v", err)
 	}
 
@@ -339,9 +339,50 @@ func TestFileTooLargeForSingleIndirect(t *testing.T) {
 	maxBlocks := uint32(NAddrDirect) + 4096/4
 	tooBig := make([]byte, (maxBlocks+1)*4096)
 
-	err := img.CreateFile("/huge.bin", tooBig, "USR", "GRP")
+	err := img.CreateFile("/huge.bin", tooBig)
 	if err == nil {
 		t.Error("expected error for file exceeding single indirect capacity")
+	}
+}
+
+// TestOwnerGroupInheritance verifies that MkDir and CreateFile inherit
+// owner/group from the parent directory (set via Create).
+func TestOwnerGroupInheritance(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.img")
+	img, err := Create(path, 1024*1024, 4096, 10.0, "HTTPD", "STCGROUP")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer img.Close()
+
+	// Create a subdirectory — should inherit HTTPD/STCGROUP from root
+	if err := img.MkDir("/web"); err != nil {
+		t.Fatalf("MkDir: %v", err)
+	}
+	dirIno, _ := img.ResolvePath("/web")
+	dirDi, _ := img.ReadInode(dirIno)
+
+	rootDi, _ := img.ReadInode(InodeRoot)
+	if dirDi.Owner != rootDi.Owner {
+		t.Errorf("dir Owner = %v, want %v (inherited from root)", dirDi.Owner, rootDi.Owner)
+	}
+	if dirDi.Group != rootDi.Group {
+		t.Errorf("dir Group = %v, want %v (inherited from root)", dirDi.Group, rootDi.Group)
+	}
+
+	// Create a file in /web — should inherit from /web (== root owner)
+	if err := img.CreateFile("/web/index.html", []byte("test")); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+	fileIno, _ := img.ResolvePath("/web/index.html")
+	fileDi, _ := img.ReadInode(fileIno)
+
+	if fileDi.Owner != rootDi.Owner {
+		t.Errorf("file Owner = %v, want %v (inherited from parent)", fileDi.Owner, rootDi.Owner)
+	}
+	if fileDi.Group != rootDi.Group {
+		t.Errorf("file Group = %v, want %v (inherited from parent)", fileDi.Group, rootDi.Group)
 	}
 }
 
@@ -356,7 +397,7 @@ func TestBlockSizes(t *testing.T) {
 			}
 
 			data := []byte("test data for block size validation")
-			if err := img.CreateFile("/test.txt", data, "TST", "GRP"); err != nil {
+			if err := img.CreateFile("/test.txt", data); err != nil {
 				t.Fatalf("CreateFile: %v", err)
 			}
 
