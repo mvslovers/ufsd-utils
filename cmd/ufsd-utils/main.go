@@ -37,6 +37,8 @@ func main() {
 		cmdRm(os.Args[2:])
 	case "rmdir":
 		cmdRmdir(os.Args[2:])
+	case "upload":
+		cmdUpload(os.Args[2:])
 	case "version":
 		fmt.Printf("ufsd-utils %s\n", version)
 	case "help", "-h", "--help":
@@ -63,6 +65,7 @@ Commands:
   mkdir    Create directory in image
   rm       Remove file or directory from image
   rmdir    Remove empty directory from image
+  upload   Upload image to MVS dataset via zOSMF API
   version  Show version
   help     Show this help
 
