@@ -171,10 +171,12 @@ func (img *Image) CreateFile(filePath string, data []byte, owner, group string) 
 		nBlocks = 0
 	}
 
-	// Phase 1 limitation: direct blocks only
-	if nBlocks > NAddrDirect {
-		return fmt.Errorf("file too large: %d bytes requires %d blocks (max %d with direct addressing = %d bytes)",
-			dataLen, nBlocks, NAddrDirect, NAddrDirect*img.blkSize)
+	// Check capacity: direct blocks + single indirect
+	indirectCap := img.blkSize / 4
+	maxBlocks := uint32(NAddrDirect) + indirectCap
+	if nBlocks > maxBlocks {
+		return fmt.Errorf("file too large: %d bytes (%d blocks, max %d with single indirect = %d bytes)",
+			dataLen, nBlocks, maxBlocks, maxBlocks*img.blkSize)
 	}
 
 	// Allocate and write data blocks
@@ -192,12 +194,30 @@ func (img *Image) CreateFile(filePath string, data []byte, owner, group string) 
 	buf := make([]byte, img.blkSize)
 	written := uint32(0)
 
+	var indBlock uint32
+	var indBuf []byte
+
 	for i := uint32(0); i < nBlocks; i++ {
 		block, err := img.AllocBlock()
 		if err != nil {
 			return fmt.Errorf("alloc data block %d: %w", i, err)
 		}
-		di.Addr[i] = block
+
+		if i < NAddrDirect {
+			di.Addr[i] = block
+		} else {
+			if indBlock == 0 {
+				// Allocate the indirect block
+				indBlock, err = img.AllocBlock()
+				if err != nil {
+					return fmt.Errorf("alloc indirect block: %w", err)
+				}
+				di.Addr[NAddrIndex1] = indBlock
+				indBuf = make([]byte, img.blkSize)
+			}
+			idx := i - NAddrDirect
+			be.PutUint32(indBuf[idx*4:], block)
+		}
 
 		// Fill block with data
 		for j := range buf {
@@ -212,6 +232,13 @@ func (img *Image) CreateFile(filePath string, data []byte, owner, group string) 
 
 		if err := img.WriteSector(block, buf); err != nil {
 			return fmt.Errorf("write data block %d: %w", i, err)
+		}
+	}
+
+	// Write the indirect block if used
+	if indBuf != nil {
+		if err := img.WriteSector(indBlock, indBuf); err != nil {
+			return fmt.Errorf("write indirect block: %w", err)
 		}
 	}
 
@@ -247,23 +274,50 @@ func (img *Image) ReadFileData(ino uint32) ([]byte, error) {
 
 	nBlocks := (di.FileSize + img.blkSize - 1) / img.blkSize
 
-	for i := uint32(0); i < nBlocks && i < NAddrDirect; i++ {
+	// Read direct blocks (addr[0..15])
+	directBlocks := nBlocks
+	if directBlocks > NAddrDirect {
+		directBlocks = NAddrDirect
+	}
+	for i := uint32(0); i < directBlocks; i++ {
 		if di.Addr[i] == 0 {
-			// Sparse hole — already zero in data[]
 			read += img.blkSize
 			continue
 		}
-
 		if err := img.ReadSector(di.Addr[i], buf); err != nil {
 			return nil, fmt.Errorf("read block %d (sector %d): %w", i, di.Addr[i], err)
 		}
-
 		chunk := img.blkSize
 		if read+chunk > di.FileSize {
 			chunk = di.FileSize - read
 		}
 		copy(data[read:read+chunk], buf[:chunk])
 		read += chunk
+	}
+
+	// Read single indirect blocks (addr[16])
+	if read < di.FileSize && di.Addr[NAddrIndex1] != 0 {
+		indBuf := make([]byte, img.blkSize)
+		if err := img.ReadSector(di.Addr[NAddrIndex1], indBuf); err != nil {
+			return nil, fmt.Errorf("read indirect block (sector %d): %w", di.Addr[NAddrIndex1], err)
+		}
+		indirectCap := img.blkSize / 4
+		for idx := uint32(0); idx < indirectCap && read < di.FileSize; idx++ {
+			block := be.Uint32(indBuf[idx*4:])
+			if block == 0 {
+				read += img.blkSize
+				continue
+			}
+			if err := img.ReadSector(block, buf); err != nil {
+				return nil, fmt.Errorf("read indirect data block %d (sector %d): %w", idx, block, err)
+			}
+			chunk := img.blkSize
+			if read+chunk > di.FileSize {
+				chunk = di.FileSize - read
+			}
+			copy(data[read:read+chunk], buf[:chunk])
+			read += chunk
+		}
 	}
 
 	return data, nil
