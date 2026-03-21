@@ -99,6 +99,56 @@ func (img *Image) AllocInode() (uint32, error) {
 	return 0, fmt.Errorf("no free inodes")
 }
 
+// FreeBlock returns a data block to the free block chain.
+func (img *Image) FreeBlock(block uint32) error {
+	if img.readOnly {
+		return fmt.Errorf("image is read-only")
+	}
+	sb := &img.sb
+
+	if sb.NFreeBlock >= MaxFreeBlock {
+		// Cache full — write current cache as chain block into `block`
+		buf := make([]byte, img.blkSize)
+		be.PutUint32(buf[0:], sb.NFreeBlock)
+		for i := uint32(0); i < sb.NFreeBlock; i++ {
+			be.PutUint32(buf[4+i*4:], sb.FreeBlock[i])
+		}
+		if err := img.WriteSector(block, buf); err != nil {
+			return fmt.Errorf("write chain block %d: %w", block, err)
+		}
+		// Reset cache — this block is now a chain pointer
+		sb.NFreeBlock = 1
+		sb.FreeBlock[0] = block
+	} else {
+		sb.FreeBlock[sb.NFreeBlock] = block
+		sb.NFreeBlock++
+	}
+
+	sb.TotalFreeBlock++
+	return nil
+}
+
+// FreeInode returns an inode to the free pool.
+// Zeros the inode on disk and adds it to the free inode cache if not full.
+func (img *Image) FreeInode(ino uint32) error {
+	if img.readOnly {
+		return fmt.Errorf("image is read-only")
+	}
+
+	// Zero the inode on disk (mode=0 marks it as free)
+	if err := img.WriteInode(ino, &DiskInode{}); err != nil {
+		return fmt.Errorf("zero inode %d: %w", ino, err)
+	}
+
+	sb := &img.sb
+	if sb.NFreeInode < MaxFreeInode {
+		sb.FreeInode[sb.NFreeInode] = ino
+		sb.NFreeInode++
+	}
+	sb.TotalFreeInode++
+	return nil
+}
+
 // FlushSuperBlock writes the current in-memory superblock to disk.
 // Must be called after AllocBlock/AllocInode to persist changes.
 func (img *Image) FlushSuperBlock() error {

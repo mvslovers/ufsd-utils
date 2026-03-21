@@ -33,6 +33,8 @@ func main() {
 		cmdCat(os.Args[2:])
 	case "mkdir":
 		cmdMkdir(os.Args[2:])
+	case "rm":
+		cmdRm(os.Args[2:])
 	case "version":
 		fmt.Printf("ufsd-utils %s\n", version)
 	case "help", "-h", "--help":
@@ -57,6 +59,7 @@ Commands:
   cp       Copy files between host and image
   cat      Display file contents from image
   mkdir    Create directory in image
+  rm       Remove file or directory from image
   version  Show version
   help     Show this help
 
@@ -525,6 +528,38 @@ func cmdMkdir(args []string) {
 		die("%v", err)
 	}
 	fmt.Printf("  created %s\n", imgPath)
+}
+
+// --- rm ---
+
+func cmdRm(args []string) {
+	fs := flag.NewFlagSet("rm", flag.ExitOnError)
+	recursive := fs.Bool("r", false, "Remove directories recursively")
+	fs.Usage = func() { fmt.Print("Usage: ufsd-utils rm [-r] <image[:/path]>\n") }
+	fs.Parse(reorderArgs(args))
+
+	if fs.NArg() < 1 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	imgFile, imgPath := parseImagePath(fs.Arg(0))
+
+	img, err := ufs.Open(imgFile, false)
+	if err != nil {
+		die("%v", err)
+	}
+	defer img.Close()
+
+	if *recursive {
+		err = img.RemoveAll(imgPath)
+	} else {
+		err = img.Remove(imgPath)
+	}
+	if err != nil {
+		die("%v", err)
+	}
+	fmt.Printf("  removed %s\n", imgPath)
 }
 
 // --- helpers ---
