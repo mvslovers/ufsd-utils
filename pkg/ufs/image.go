@@ -93,7 +93,7 @@ func Create(path string, sizeBytes int64, blkSize uint32, inodePct float64,
 		DataBlockStart: dataBlockStart,
 		VolumeSize:     totalBlocks,
 		TotalFreeBlock: totalBlocks - dataBlockStart,
-		TotalFreeInode: inodeBlocks*inodesPerBlock - 2, // minus reserved inodes 0,1
+		TotalFreeInode: inodeBlocks*inodesPerBlock - 1, // minus BALBLK (inode 1); inode 0 has no physical slot
 		InodesPerBlock: inodesPerBlock,
 		BlkSizeShift:   shift,
 		IListSector:    IListSector,
@@ -133,7 +133,12 @@ func Create(path string, sizeBytes int64, blkSize uint32, inodePct float64,
 		return nil, fmt.Errorf("root dir: %w", err)
 	}
 
-	// Phase 6: Write final superblock
+	// Phase 6: Populate free inode cache in superblock
+	// UFSD reads s_ninode/s_inode[] from the superblock at mount time.
+	// Without this, UFSD sees 0 free inodes and rejects FOPEN.
+	img.seedFreeInodeCache()
+
+	// Phase 7: Write final superblock
 	if err := img.writeSuperBlock(); err != nil {
 		img.Close()
 		os.Remove(path)
@@ -324,7 +329,7 @@ func (img *Image) ReadDir(dirIno uint32) ([]DirEntry, error) {
 
 // NameString returns the filename from a DirEntry as a Go string (EBCDIC decoded).
 func (de *DirEntry) NameString() string {
-	return ebcdic.DecodeString(de.Name[:])
+	return ebcdic.Decode(de.Name[:])
 }
 
 // --- internal helpers ---
@@ -462,14 +467,21 @@ func (img *Image) createRootDir(owner, group string) error {
 
 	// Inode 2 is at offset (2-1) % ipb * 128 = 128
 	off := uint32(InodeSize) // inode 2 at index 1 in first inode block
+
+	// Zero the entire inode slot first — the block was 0xFF-filled
+	// for reserved inodes, leaving garbage in codepage and addr[1..18]
+	for i := uint32(0); i < InodeSize; i++ {
+		inodeBuf[off+i] = 0
+	}
+
 	be.PutUint16(inodeBuf[off+0x00:], IFDIR|DefaultUmask)
 	be.PutUint16(inodeBuf[off+0x02:], 2) // nlink: . and ..
 	be.PutUint32(inodeBuf[off+0x04:], DirentSize*2) // filesize: 2 entries
 	copy(inodeBuf[off+0x08:], now.Raw[:]) // ctime
 	copy(inodeBuf[off+0x10:], now.Raw[:]) // mtime
 	copy(inodeBuf[off+0x18:], now.Raw[:]) // atime
-	copy(inodeBuf[off+0x20:], ebcdic.EncodeString(owner, 9))
-	copy(inodeBuf[off+0x29:], ebcdic.EncodeString(group, 9))
+	copy(inodeBuf[off+0x20:], encodeOwner(owner))
+	copy(inodeBuf[off+0x29:], encodeOwner(group))
 	be.PutUint32(inodeBuf[off+0x34:], rootBlock) // addr[0]
 
 	if err := img.WriteSector(IListSector, inodeBuf); err != nil {
@@ -480,10 +492,65 @@ func (img *Image) createRootDir(owner, group string) error {
 	dirBuf := make([]byte, img.blkSize)
 	// entry 0: "."
 	be.PutUint32(dirBuf[0:], InodeRoot)
-	copy(dirBuf[4:], ebcdic.EncodeString(".", 60))
+	copy(dirBuf[4:], encodeEBCDIC(".", 60))
 	// entry 1: ".."
 	be.PutUint32(dirBuf[64:], InodeRoot) // root parent is itself
-	copy(dirBuf[68:], ebcdic.EncodeString("..", 60))
+	copy(dirBuf[68:], encodeEBCDIC("..", 60))
 
 	return img.WriteSector(rootBlock, dirBuf)
+}
+
+// encodeEBCDIC converts an ASCII string to a NUL-padded EBCDIC byte
+// slice of the given size. This matches the on-disk format used by
+// ufs370 and UFSD for owner, group, and filename fields.
+// Unlike ebcdic.Encode which pads with EBCDIC space (0x40), this
+// function pads with NUL (0x00).
+func encodeEBCDIC(s string, size int) []byte {
+	buf := make([]byte, size) // zero-filled = NUL-padded
+	for i := 0; i < len(s) && i < size-1; i++ {
+		t := ebcdic.Encode(string(s[i]), 1)
+		buf[i] = t[0]
+	}
+	return buf
+}
+
+// encodeOwner is a convenience wrapper for 9-byte owner/group fields.
+func encodeOwner(s string) []byte {
+	return encodeEBCDIC(s, 9)
+}
+
+// seedFreeInodeCache scans the inode list and fills the superblock's
+// free inode cache (s_ninode / s_inode[]). Must be called after
+// createRootDir so that allocated inodes (0, 1, 2) are already marked.
+func (img *Image) seedFreeInodeCache() {
+	sb := &img.sb
+	sb.NFreeInode = 0
+
+	ipb := sb.InodesPerBlock
+	buf := make([]byte, img.blkSize)
+
+	for sector := sb.IListSector; sector < sb.DataBlockStart; sector++ {
+		if err := img.ReadSector(sector, buf); err != nil {
+			continue
+		}
+		for i := uint32(0); i < ipb; i++ {
+			off := i * InodeSize
+			mode := be.Uint16(buf[off:])
+			// Reserved inodes 0,1 are filled with 0xFF, skip them
+			if mode != 0 {
+				continue
+			}
+
+			ino := (sector-sb.IListSector)*ipb + i + 1
+			if ino <= InodeBALBLK {
+				continue
+			}
+
+			sb.FreeInode[sb.NFreeInode] = ino
+			sb.NFreeInode++
+			if sb.NFreeInode >= MaxFreeInode {
+				return
+			}
+		}
+	}
 }

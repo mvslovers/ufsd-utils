@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"path"
 	"strings"
-
-	"github.com/mvslovers/ufsd-utils/pkg/ebcdic"
 )
 
 // MkDir creates a new directory at the given path.
@@ -60,9 +58,9 @@ func (img *Image) MkDir(dirPath, owner, group string) error {
 	// Write directory data block (. and ..)
 	dirBuf := make([]byte, img.blkSize)
 	be.PutUint32(dirBuf[0:], ino)
-	copy(dirBuf[4:], ebcdic.EncodeString(".", 60))
+	copy(dirBuf[4:], encodeEBCDIC(".", 60))
 	be.PutUint32(dirBuf[64:], parentIno)
-	copy(dirBuf[68:], ebcdic.EncodeString("..", 60))
+	copy(dirBuf[68:], encodeEBCDIC("..", 60))
 
 	if err := img.WriteSector(block, dirBuf); err != nil {
 		return fmt.Errorf("write dir block: %w", err)
@@ -77,8 +75,8 @@ func (img *Image) MkDir(dirPath, owner, group string) error {
 		MTime:    now,
 		ATime:    now,
 	}
-	copy(di.Owner[:], ebcdic.EncodeString(owner, 9))
-	copy(di.Group[:], ebcdic.EncodeString(group, 9))
+	copy(di.Owner[:], encodeOwner(owner))
+	copy(di.Group[:], encodeOwner(group))
 	di.Addr[0] = block
 
 	if err := img.WriteInode(ino, di); err != nil {
@@ -188,8 +186,8 @@ func (img *Image) CreateFile(filePath string, data []byte, owner, group string) 
 		MTime:    now,
 		ATime:    now,
 	}
-	copy(di.Owner[:], ebcdic.EncodeString(owner, 9))
-	copy(di.Group[:], ebcdic.EncodeString(group, 9))
+	copy(di.Owner[:], encodeOwner(owner))
+	copy(di.Group[:], encodeOwner(group))
 
 	buf := make([]byte, img.blkSize)
 	written := uint32(0)
@@ -351,7 +349,7 @@ func (img *Image) addDirEntry(dirIno uint32, name string, childIno uint32) error
 			if ino == 0 {
 				// Free slot — use it
 				be.PutUint32(buf[off:], childIno)
-				encoded := ebcdic.EncodeString(name, 60)
+				encoded := encodeEBCDIC(name, 60)
 				copy(buf[off+4:off+64], encoded)
 				return img.WriteSector(di.Addr[i], buf)
 			}
@@ -373,7 +371,7 @@ func (img *Image) addDirEntry(dirIno uint32, name string, childIno uint32) error
 		buf[i] = 0
 	}
 	be.PutUint32(buf[0:], childIno)
-	copy(buf[4:64], ebcdic.EncodeString(name, 60))
+	copy(buf[4:64], encodeEBCDIC(name, 60))
 
 	if err := img.WriteSector(block, buf); err != nil {
 		return err
