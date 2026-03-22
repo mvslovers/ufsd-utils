@@ -37,6 +37,8 @@ func main() {
 		cmdRm(os.Args[2:])
 	case "rmdir":
 		cmdRmdir(os.Args[2:])
+	case "upload":
+		cmdUpload(os.Args[2:])
 	case "version":
 		fmt.Printf("ufsd-utils %s\n", version)
 	case "help", "-h", "--help":
@@ -63,6 +65,7 @@ Commands:
   mkdir    Create directory in image
   rm       Remove file or directory from image
   rmdir    Remove empty directory from image
+  upload   Upload image to MVS dataset via zOSMF API
   version  Show version
   help     Show this help
 
@@ -141,8 +144,7 @@ func cmdCreate(args []string) {
 		sb.VolumeSize-sb.DataBlockStart, sb.TotalFreeBlock)
 	fmt.Printf("  Root owner:      %s/%s\n", *owner, *group)
 	fmt.Println("  Format:          UFS370 v1 (time64 timestamps)")
-	fmt.Println()
-	printMVSAlloc(bs, sb.VolumeSize)
+	printUploadHint(path)
 	fmt.Println("Done.")
 }
 
@@ -218,8 +220,7 @@ func cmdInfo(args []string) {
 		}
 	}
 
-	fmt.Println()
-	printMVSAlloc(blk, sb.VolumeSize)
+	printUploadHint(fs.Arg(0))
 }
 
 // --- ls ---
@@ -674,32 +675,9 @@ func filepath_ext(p string) string {
 	return ""
 }
 
-// printMVSAlloc prints MVS allocation parameters for the given
-// block size and total block count.
-// UFSD opens datasets via BDAM regardless of DSORG, so a standard
-// PS dataset with the correct BLKSIZE works fine and is easier to
-// create and upload (zowe, IND$FILE, ISPF 3.2 all work).
-func printMVSAlloc(blksize, totalBlocks uint32) {
-	fmt.Println("  MVS Dataset Allocation:")
+func printUploadHint(imgPath string) {
 	fmt.Println()
-	fmt.Printf("    BLKSIZE=%d  SPACE=(%d,(%d))\n",
-		blksize, blksize, totalBlocks)
-	fmt.Println()
-	fmt.Println("    ISPF 3.2 / RPF 2:")
-	fmt.Printf("      RECORD FORMAT          ==> U\n")
-	fmt.Printf("      LOGICAL RECORD LENGTH  ==> %d\n", blksize)
-	fmt.Printf("      PHYSICAL BLOCK SIZE    ==> %d\n", blksize)
-	fmt.Printf("      ALLOCATION SPACE UNIT  ==> B        (B = blocks)\n")
-	fmt.Printf("      PRIMARY SPACE QUANTITY ==> %d\n", totalBlocks)
-	fmt.Println()
-	fmt.Println("    JCL:")
-	fmt.Printf("      //ALLOC  EXEC PGM=IEFBR14\n")
-	fmt.Printf("      //DISK   DD DSN=your.dataset.name,\n")
-	fmt.Printf("      //          DISP=(NEW,CATLG,DELETE),UNIT=SYSDA,\n")
-	fmt.Printf("      //          SPACE=(%d,(%d)),\n", blksize, totalBlocks)
-	fmt.Printf("      //          DCB=(RECFM=U,BLKSIZE=%d)\n", blksize)
-	fmt.Println()
-	fmt.Println("    Transfer: zowe, IND$FILE (binary), or FTP binary PUT")
+	fmt.Printf("  Upload to MVS:  ufsd-utils upload %s --dsn YOUR.DATASET.NAME\n", imgPath)
 }
 
 // reorderArgs moves flags (--foo, -f, --foo=bar) before positional args,
