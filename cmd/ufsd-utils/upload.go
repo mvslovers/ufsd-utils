@@ -112,7 +112,7 @@ Options:
 	}
 
 	// Allocate dataset
-	fmt.Printf("  Allocating %s (DSORG=DA, RECFM=U, BLKSIZE=%d, %d blocks)\n",
+	fmt.Printf("  Allocating %s (RECFM=U, BLKSIZE=%d, %d tracks)\n",
 		*dsn, blkSize, totalBlocks)
 	if err := allocateDataset(baseURL, cfg, *dsn, blkSize, totalBlocks); err != nil {
 		die("allocate dataset: %v", err)
@@ -193,7 +193,7 @@ func allocateDataset(baseURL string, cfg mvsConfig, dsn string, blkSize, totalBl
 	tracks := (totalBlocks + blocksPerTrack - 1) / blocksPerTrack
 
 	allocBody := fmt.Sprintf(
-		`{"dsorg":"DA","alcunit":"TRK","primary":%d,"secondary":0,"recfm":"U","lrecl":%d,"blksize":%d}`,
+		`{"dsorg":"PS","alcunit":"TRK","primary":%d,"secondary":0,"recfm":"U","lrecl":%d,"blksize":%d}`,
 		tracks, blkSize, blkSize)
 
 	url := fmt.Sprintf("%s/restfiles/ds/%s", baseURL, dsn)
