@@ -112,7 +112,7 @@ Options:
 	}
 
 	// Allocate dataset
-	fmt.Printf("  Allocating %s (RECFM=U, BLKSIZE=%d, %d blocks)\n",
+	fmt.Printf("  Allocating %s (DSORG=DA, RECFM=U, BLKSIZE=%d, %d blocks)\n",
 		*dsn, blkSize, totalBlocks)
 	if err := allocateDataset(baseURL, cfg, *dsn, blkSize, totalBlocks); err != nil {
 		die("allocate dataset: %v", err)
@@ -162,7 +162,7 @@ func datasetExists(baseURL string, cfg mvsConfig, dsn string) (bool, error) {
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 200 {
-		return false, fmt.Errorf("GET %s: HTTP %d: %s", url, resp.StatusCode, body)
+		return false, httpError("GET", url, resp.StatusCode, body)
 	}
 
 	var result struct {
@@ -183,18 +183,18 @@ func datasetExists(baseURL string, cfg mvsConfig, dsn string) (bool, error) {
 }
 
 func allocateDataset(baseURL string, cfg mvsConfig, dsn string, blkSize, totalBlocks uint32) error {
-	// Calculate tracks: blocks per track depends on block size
-	// 3350: 19254 bytes/track, 3390: 56664 bytes/track
-	// Use conservative estimate: ceil(totalBlocks * blkSize / 19254)
-	imageBytes := int64(totalBlocks) * int64(blkSize)
-	tracks := (imageBytes + 19253) / 19254
-	if tracks < 1 {
-		tracks = 1
+	// Calculate tracks using blocks-per-track for 3350 (conservative).
+	// 3350 track capacity: 19254 bytes. With RECFM=U and inter-block gaps,
+	// integer division gives usable blocks per track.
+	blocksPerTrack := uint32(19254) / blkSize
+	if blocksPerTrack < 1 {
+		blocksPerTrack = 1
 	}
+	tracks := (totalBlocks + blocksPerTrack - 1) / blocksPerTrack
 
 	allocBody := fmt.Sprintf(
-		`{"dsorg":"PS","alcunit":"TRK","primary":%d,"secondary":%d,"recfm":"U","lrecl":%d,"blksize":%d}`,
-		tracks, tracks/10+1, blkSize, blkSize)
+		`{"dsorg":"DA","alcunit":"TRK","primary":%d,"secondary":0,"recfm":"U","lrecl":%d,"blksize":%d}`,
+		tracks, blkSize, blkSize)
 
 	url := fmt.Sprintf("%s/restfiles/ds/%s", baseURL, dsn)
 	req, err := http.NewRequest("POST", url, strings.NewReader(allocBody))
@@ -212,7 +212,7 @@ func allocateDataset(baseURL string, cfg mvsConfig, dsn string, blkSize, totalBl
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 201 && resp.StatusCode != 200 {
-		return fmt.Errorf("POST %s: HTTP %d: %s", url, resp.StatusCode, body)
+		return httpError("POST", url, resp.StatusCode, body)
 	}
 	return nil
 }
@@ -236,7 +236,7 @@ func uploadBinary(baseURL string, cfg mvsConfig, dsn string, data []byte) error 
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 204 && resp.StatusCode != 200 {
-		return fmt.Errorf("PUT %s: HTTP %d: %s", url, resp.StatusCode, body)
+		return httpError("PUT", url, resp.StatusCode, body)
 	}
 	return nil
 }
@@ -257,9 +257,26 @@ func deleteDataset(baseURL string, cfg mvsConfig, dsn string) error {
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 204 && resp.StatusCode != 200 {
-		return fmt.Errorf("DELETE %s: HTTP %d: %s", url, resp.StatusCode, body)
+		return httpError("DELETE", url, resp.StatusCode, body)
 	}
 	return nil
+}
+
+func httpError(method, url string, status int, body []byte) error {
+	switch status {
+	case 401:
+		return fmt.Errorf("%s %s: authentication failed (HTTP 401) — check MVS_USER/MVS_PASS", method, url)
+	case 403:
+		return fmt.Errorf("%s %s: access denied (HTTP 403)", method, url)
+	case 404:
+		return fmt.Errorf("%s %s: not found (HTTP 404)", method, url)
+	default:
+		detail := strings.TrimSpace(string(body))
+		if len(detail) > 200 {
+			detail = detail[:200]
+		}
+		return fmt.Errorf("%s %s: HTTP %d: %s", method, url, status, detail)
+	}
 }
 
 // loadDotEnv reads a .env file from the current directory and sets
