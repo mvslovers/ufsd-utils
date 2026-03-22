@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -12,8 +13,20 @@ import (
 	"github.com/mvslovers/ufsd-utils/pkg/ufs"
 )
 
-// version is set at build time via -ldflags
-var version = "dev"
+// version is set at build time via -ldflags, or read from Go module
+// info when installed via `go install`.
+var version = ""
+
+func init() {
+	if version != "" {
+		return
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = strings.TrimPrefix(info.Main.Version, "v")
+	} else {
+		version = "dev"
+	}
+}
 
 func main() {
 	if len(os.Args) < 2 {
