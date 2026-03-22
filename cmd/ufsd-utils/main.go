@@ -12,7 +12,8 @@ import (
 	"github.com/mvslovers/ufsd-utils/pkg/ufs"
 )
 
-const version = "0.1.0"
+// version is set at build time via -ldflags
+var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
