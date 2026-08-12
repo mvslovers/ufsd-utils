@@ -109,8 +109,8 @@ func cmdCreate(args []string) {
 	blksize := fs.Uint("blksize", ufs.DefaultBlockSize, "Block size (512..8192)")
 	fs.UintVar(blksize, "blocksize", ufs.DefaultBlockSize, "Block size (alias for --blksize)")
 	inodePct := fs.Float64("inodes", 10.0, "Percentage of blocks for inodes")
-	owner := fs.String("owner", "", "Root directory owner (default: current user or HERC01)")
-	group := fs.String("group", "", "Root directory group (default: ADMIN)")
+	owner := fs.String("owner", "", "Root directory owner (default: none — the filesystem is unowned)")
+	group := fs.String("group", "", "Root directory group (default: none)")
 
 	fs.Usage = func() {
 		fmt.Print("Usage: ufsd-utils create [options] <image-file>\n\n")
@@ -124,12 +124,10 @@ func cmdCreate(args []string) {
 	}
 	path := fs.Arg(0)
 
-	if *owner == "" {
-		*owner = currentUser()
-	}
-	if *group == "" {
-		*group = "ADMIN"
-	}
+	// No owner unless one was asked for (mvslovers/ufsd#62). Deriving it
+	// from the OS user made the image depend on who ran the tool, which
+	// is exactly what UFSFMT dropped when it removed the ACEE lookup, and
+	// it made two runs of the same command produce different bytes.
 
 	sizeBytes, err := parseSize(*size)
 	if err != nil {
@@ -156,7 +154,7 @@ func cmdCreate(args []string) {
 	fmt.Printf("  Inode blocks:    %d (%d inodes)\n", inodeBlocks, totalInodes)
 	fmt.Printf("  Data blocks:     %d (free: %d)\n",
 		sb.VolumeSize-sb.DataBlockStart, sb.TotalFreeBlock)
-	fmt.Printf("  Root owner:      %s/%s\n", *owner, *group)
+	fmt.Printf("  Root owner:      %s/%s\n", ownerText(*owner), ownerText(*group))
 	fmt.Println("  Format:          UFS370 v1 (time64 timestamps)")
 	printUploadHint(path)
 	fmt.Println("Done.")
@@ -224,8 +222,8 @@ func cmdInfo(args []string) {
 		group := ebcdic.Decode(root.Group[:])
 		fmt.Println()
 		fmt.Printf("Root inode:      %d\n", ufs.InodeRoot)
-		fmt.Printf("Root owner:      %s\n", owner)
-		fmt.Printf("Root group:      %s\n", group)
+		fmt.Printf("Root owner:      %s\n", ownerText(owner))
+		fmt.Printf("Root group:      %s\n", ownerText(group))
 		fmt.Printf("Root mode:       %04o\n", root.Mode&0xFFF)
 		fmt.Printf("Root nlink:      %d\n", root.NLink)
 		fmt.Printf("Root size:       %d bytes\n", root.FileSize)
@@ -716,16 +714,15 @@ func reorderArgs(args []string) []string {
 	return append(flags, positional...)
 }
 
-// currentUser returns the current OS username in uppercase,
-// or "HERC01" as fallback.
-func currentUser() string {
-	if u := os.Getenv("USER"); u != "" {
-		return strings.ToUpper(u)
+// ownerText renders an owner or group for a report. An unowned filesystem
+// has to say so: printing nothing there reads as a missing value rather
+// than as the legitimate one it is (mvslovers/ufsd#62). It matches what
+// UFSFMT prints for the same field.
+func ownerText(s string) string {
+	if s == "" {
+		return "(none)"
 	}
-	if u := os.Getenv("USERNAME"); u != "" {
-		return strings.ToUpper(u)
-	}
-	return "HERC01"
+	return s
 }
 
 func formatMode(mode uint16) string {

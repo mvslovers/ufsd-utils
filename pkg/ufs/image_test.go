@@ -599,3 +599,63 @@ func TestBlockSizes(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateLeavesOwnerEmpty pins the format-time default (mvslovers/ufsd#62).
+// A formatter cannot know who a filesystem belongs to, so an unspecified
+// owner stays unspecified rather than becoming an invented name that is
+// indistinguishable from one the caller chose. UFSD reads empty as unowned
+// and decides write access from the mount's OWNER() instead.
+func TestCreateLeavesOwnerEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unowned.img")
+	img, err := Create(path, 1024*1024, 4096, 10.0, "", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer img.Close()
+
+	di, err := img.ReadInode(InodeRoot)
+	if err != nil {
+		t.Fatalf("ReadInode(root): %v", err)
+	}
+
+	var zero [9]byte
+	if di.Owner != zero {
+		t.Errorf("root Owner = %q, want empty", di.OwnerString())
+	}
+	if di.Group != zero {
+		t.Errorf("root Group = %q, want empty", di.GroupString())
+	}
+
+	// An empty owner has to propagate, or the next directory created
+	// re-introduces a name nobody asked for.
+	if err := img.MkDir("/sub"); err != nil {
+		t.Fatalf("MkDir: %v", err)
+	}
+	subIno, _ := img.ResolvePath("/sub")
+	subDi, _ := img.ReadInode(subIno)
+	if subDi.Owner != zero || subDi.Group != zero {
+		t.Errorf("subdir owner/group = %q/%q, want both empty",
+			subDi.OwnerString(), subDi.GroupString())
+	}
+}
+
+// TestCreateKeepsExplicitOwner is the other side of the same rule: a name
+// that was given is written unchanged.
+func TestCreateKeepsExplicitOwner(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "owned.img")
+	img, err := Create(path, 1024*1024, 4096, 10.0, "MIKEG1", "USER")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer img.Close()
+
+	di, _ := img.ReadInode(InodeRoot)
+	if di.OwnerString() != "MIKEG1" {
+		t.Errorf("root Owner = %q, want MIKEG1", di.OwnerString())
+	}
+	if di.GroupString() != "USER" {
+		t.Errorf("root Group = %q, want USER", di.GroupString())
+	}
+}
