@@ -26,7 +26,8 @@ var be = binary.BigEndian
 // Create creates a new UFS370 disk image, formats it, and returns the handle.
 // sizeBytes is the desired image size; it will be rounded down to a whole
 // number of blocks. inodePct controls what percentage of blocks are reserved
-// for inodes (default 10.0). owner/group set the root directory inode fields.
+// for inodes (default 10.0). owner/group set the root directory inode fields
+// and are written as given -- empty stays empty, meaning unowned.
 func Create(path string, sizeBytes int64, blkSize uint32, inodePct float64,
 	owner, group string) (*Image, error) {
 
@@ -36,12 +37,11 @@ func Create(path string, sizeBytes int64, blkSize uint32, inodePct float64,
 	if inodePct < 1.0 || inodePct > 50.0 {
 		inodePct = 10.0
 	}
-	if owner == "" {
-		owner = "HERC01"
-	}
-	if group == "" {
-		group = "ADMIN"
-	}
+	// An empty owner or group is written as empty (mvslovers/ufsd#62): a
+	// formatter cannot know who the filesystem belongs to, and a name
+	// invented here is indistinguishable from one the caller chose. UFSD
+	// reads empty as unowned, and write access is decided by OWNER() on
+	// the mount statement, never by these fields.
 
 	totalBlocks := uint32(sizeBytes / int64(blkSize))
 	if totalBlocks < 8 {
@@ -330,6 +330,18 @@ func (img *Image) ReadDir(dirIno uint32) ([]DirEntry, error) {
 // NameString returns the filename from a DirEntry as a Go string (EBCDIC decoded).
 func (de *DirEntry) NameString() string {
 	return ebcdic.Decode(de.Name[:])
+}
+
+// OwnerString returns the inode's owner as an ASCII string, empty when the
+// filesystem was formatted without one (see Create).
+func (di *DiskInode) OwnerString() string {
+	return ebcdic.Decode(di.Owner[:])
+}
+
+// GroupString returns the inode's group as an ASCII string, empty when the
+// filesystem was formatted without one (see Create).
+func (di *DiskInode) GroupString() string {
+	return ebcdic.Decode(di.Group[:])
 }
 
 // --- internal helpers ---

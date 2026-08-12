@@ -489,8 +489,14 @@ Starting from `datablock_start`, build the chain:
    - `addr[1..18] = 0` (must be zero, not left over from reserved fill)
    - `codepage = 0`
    - `ctime/mtime/atime = now` (time64 format)
-   - `owner = "HERC01"` (EBCDIC, NUL-padded to 9 bytes)
-   - `group = "ADMIN"` (EBCDIC, NUL-padded to 9 bytes)
+   - `owner` = the owner given to the formatter (EBCDIC, NUL-padded to 9
+     bytes); all-NUL when none was given, which means *unowned*
+   - `group` = likewise, all-NUL when none was given
+
+   Neither field is read by any permission check. Write access to a mounted
+   filesystem is decided by `OWNER()` on the UFSD parmlib `MOUNT` statement,
+   so a formatter that invents a name here would only be guessing at metadata
+   (mvslovers/ufsd#62).
 4. Write root data block:
    - Entry 0: `inode=2, name="."` (EBCDIC, NUL-padded to 60 bytes)
    - Entry 1: `inode=2, name=".."` (EBCDIC, NUL-padded to 60 bytes)
